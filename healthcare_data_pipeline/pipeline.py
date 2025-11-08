@@ -353,7 +353,7 @@ def ingest_drug_data() -> bool:
     try:
         from healthcare_data_pipeline.ingest import ingest_drug_data as ingest_drugs
 
-        print_info("Starting RxNav drug data ingestion (3-5 minutes with optimizations)...\n")
+        print_info("Starting RxNav drug data ingestion (5-10 minutes)...\n")
 
         stats = ingest_drugs()
 
@@ -387,14 +387,37 @@ def transform_data(gemini_api_key: str | None = None, use_gemini: bool = True) -
         return False
 
     try:
+        # Load API key from .env if not provided
+        if not gemini_api_key and use_gemini:
+            try:
+                from dotenv import load_dotenv
+
+                project_root = Path(__file__).parent.parent
+                env_path = project_root / ".env"
+                if env_path.exists():
+                    load_dotenv(env_path)
+                    gemini_api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get(
+                        "GOOGLE_API_KEY"
+                    )
+                    if gemini_api_key:
+                        print_info("✅ Loaded Gemini API key from .env file")
+            except ImportError:
+                pass
+            except Exception as e:
+                print_warning(f"Could not load .env: {e}")
+
         cmd = [sys.executable, str(transform_script)]
 
-        if use_gemini and gemini_api_key:
+        # Always try to use Gemini if key is available
+        if gemini_api_key:
             cmd.extend(["--gemini-key", gemini_api_key])
-            print_info("Gemini enrichment enabled")
+            print_info("🔧 Running with Gemini enrichment (will retry on failures)")
         else:
-            cmd.append("--no-gemini")
-            print_info("Running without Gemini enrichment (faster)")
+            if use_gemini:
+                print_warning("⚠️  Gemini API key not found in .env or command line")
+                print_info("🔧 Running transformation without enrichment")
+            else:
+                print_info("🔧 Running transformation without enrichment (--no-gemini flag)")
 
         print_info(f"Running transformation script: {transform_script}\n")
 
