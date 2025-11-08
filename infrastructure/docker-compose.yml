@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # Your existing MongoDB service
   mongodb:
     image: mongo:7.0
     container_name: text_to_mongo_db
@@ -23,6 +24,7 @@ services:
       retries: 5
       start_period: 40s
 
+  # Your existing Redis service
   redis:
     image: redis:7.2-alpine
     container_name: text_to_mongo_redis
@@ -40,6 +42,44 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  # Synthea - Generate synthetic healthcare data
+  # Using Eclipse Temurin (Java) image to run Synthea Java JAR
+  synthea:
+    image: eclipse-temurin:17-jdk
+    container_name: text_to_mongo_synthea
+    working_dir: /app
+    volumes:
+      - ./synthea_output:/output
+    networks:
+      - text_to_mongo_network
+    profiles:
+      - data-generation  # Only runs when explicitly called
+    # Command will download and run Synthea Java JAR
+    # Format: -p <num_patients> <state>
+
+  # Data Ingestion Service - Load FHIR data into MongoDB
+  data_ingestion:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingestion
+    container_name: text_to_mongo_ingestion
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_HOST: mongodb
+      MONGO_PORT: 27017
+      MONGO_USER: admin
+      MONGO_PASSWORD: mongopass123
+      MONGO_DB: text_to_mongo_db
+      FHIR_DATA_PATH: /data/fhir
+    volumes:
+      - ./synthea_output:/data
+    networks:
+      - text_to_mongo_network
+    profiles:
+      - data-generation  # Only runs when explicitly called
 
 volumes:
   mongo_data:
