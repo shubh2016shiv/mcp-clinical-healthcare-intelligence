@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: text_to_mongo_db
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: mongopass123
+      MONGO_INITDB_DATABASE: text_to_mongo_db
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    networks:
+      - text_to_mongo_network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: text_to_mongo_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass redispass123
+    volumes:
+      - redis_data:/data
+    networks:
+      - text_to_mongo_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  mongo_data:
+    name: text_to_mongo_mongo_data
+  mongo_config:
+    name: text_to_mongo_mongo_config
+  redis_data:
+    name: text_to_mongo_redis_data
+
+networks:
+  text_to_mongo_network:
+    name: text_to_mongo_network
+    driver: bridge
