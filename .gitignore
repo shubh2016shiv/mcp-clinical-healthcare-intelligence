@@ -1,0 +1,83 @@
+# Python
+
+__pycache__/
+
+*.py[cod]
+
+*$py.class
+
+*.so
+
+.Python
+
+venv/
+
+env/
+
+ENV/
+
+.venv
+
+
+
+# Testing
+
+.pytest_cache/
+
+htmlcov/
+
+.coverage
+
+*.cover
+
+
+
+# IDEs
+
+.vscode/
+
+.idea/
+
+*.swp
+
+*.swo
+
+
+
+# Environment
+
+.env
+
+.env.local
+
+
+
+# Logs
+
+*.log
+
+
+
+# OS
+
+.DS_Store
+
+Thumbs.db
+
+
+
+# Build
+
+build/
+
+dist/
+
+*.egg-info/
+
+
+
+# Evaluation reports
+
+evaluation/reports/*.json
+
+evaluation/reports/*.html
