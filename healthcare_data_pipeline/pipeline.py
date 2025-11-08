@@ -6,6 +6,7 @@ Fixed version that properly handles Docker Compose command arguments.
 """
 
 import argparse
+import logging
 import shutil
 import subprocess
 import sys
@@ -388,6 +389,43 @@ def ingest_data(synthea_output_dir: Path) -> bool:
         return False
 
 
+def ingest_drug_data() -> bool:
+    """Ingest RxNav drug data with ATC classifications into MongoDB.
+
+    Calls the drug ingestion function from ingest.py to extract and load
+    drug ingredient and ATC classification data from the RxNav API.
+    This step runs after Synthea ingestion and is non-critical (won't fail pipeline).
+    """
+    print_header("INGESTING RXNAV DRUG DATA")
+
+    try:
+        from healthcare_data_pipeline.ingest import ingest_drug_data as ingest_drugs
+
+        print_info("Starting RxNav drug data ingestion (this may take 5-10 minutes)...\n")
+
+        stats = ingest_drugs()
+
+        if stats.get("errors", 0) > 0:
+            print_warning(f"Drug ingestion completed with {stats['errors']} error(s)")
+            print_info("Continuing pipeline (drug data is optional)")
+            return True
+        else:
+            print_success("Drug data ingestion completed successfully")
+            return True
+
+    except ImportError as e:
+        print_warning(f"Could not import drug ingestion module: {e}")
+        print_info("Continuing pipeline without drug data")
+        return True
+
+    except Exception as e:
+        print_warning(f"Drug ingestion failed: {e}")
+        print_info("Continuing pipeline without drug data")
+        logger_import = logging.getLogger(__name__)
+        logger_import.debug(f"Drug ingestion error details: {e}", exc_info=True)
+        return True
+
+
 def verify_data(
     host: str = "localhost",
     port: int = 27017,
@@ -420,6 +458,7 @@ def verify_data(
             "immunizations",
             "careplans",
             "diagnosticreports",
+            "drugs",
         ]
 
         total_docs = 0
@@ -576,6 +615,10 @@ Examples:
     if not ingest_data(synthea_output_dir):
         print_error("Failed to ingest data")
         sys.exit(1)
+    print()
+
+    # Ingest drug data (optional, non-critical)
+    ingest_drug_data()
     print()
 
     # Verify data

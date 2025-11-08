@@ -279,6 +279,12 @@ def create_indexes(db) -> None:
             ("code.coding.code", {}),
             ("effectiveDateTime", {}),
         ],
+        "drugs": [
+            ("ingredient_rxcui", {"unique": True}),
+            ("primary_drug_name", {}),
+            ("therapeutic_class_l2", {}),
+            ("drug_class_l3", {}),
+        ],
     }
 
     indexes_created = 0
@@ -461,6 +467,151 @@ def ingest_fhir_data(
     client.close()
 
     return stats
+
+
+def ingest_drug_data(
+    db_name: str = "text_to_mongo_db",
+    host: str = "localhost",
+    port: int = 27017,
+    user: str = "admin",
+    password: str = "mongopass123",
+    request_delay: float = 0.9,
+) -> dict[str, int]:
+    """Ingest RxNav drug data with ATC classifications into MongoDB.
+
+    Extracts drug ingredient and ATC classification data from the RxNav API,
+    validates using Pydantic models, and ingests into the MongoDB 'drugs' collection.
+    Uses upsert operations to ensure idempotency - safe to re-run without duplicates.
+
+    Args:
+        db_name: MongoDB database name
+        host: MongoDB host
+        port: MongoDB port
+        user: MongoDB username
+        password: MongoDB password
+        request_delay: Seconds to wait between RxNav API requests
+
+    Returns:
+        Dictionary with ingestion statistics (drugs_ingested, errors)
+    """
+    from healthcare_data_pipeline.models import RxNavDrugModel
+    from healthcare_data_pipeline.rxnav_extract import extract_drug_data
+
+    print_header("DRUG DATA INGESTION PIPELINE (RXNAV)")
+
+    # Connect to MongoDB
+    client = get_mongodb_client(host, port, user, password, db_name)
+
+    if not wait_for_mongodb(client):
+        print_error("Cannot proceed without MongoDB connection")
+        return {"drugs_ingested": 0, "errors": 1}
+
+    db = client[db_name]
+    collection = db["drugs"]
+
+    # Initialize statistics
+    stats = {"drugs_ingested": 0, "errors": 0, "validation_errors": 0}
+
+    try:
+        print_info("Extracting drug data from RxNav API...")
+        print_warning("This may take several minutes on first run\n")
+
+        # Extract drug data from RxNav API
+        drug_data = extract_drug_data(request_delay=request_delay)
+
+        if not drug_data:
+            print_warning("No drug data retrieved from RxNav API")
+            client.close()
+            return stats
+
+        print_success(f"Retrieved {len(drug_data)} drug records from RxNav")
+        print_info("Validating and ingesting drug data...\n")
+
+        # Validate and prepare records for insertion
+        valid_records = []
+        for idx, record in enumerate(drug_data, 1):
+            try:
+                # Validate using Pydantic model
+                drug_model = RxNavDrugModel(**record)
+                drug_model.add_ingestion_metadata()
+
+                # Convert model to dictionary for MongoDB
+                valid_records.append(drug_model.model_dump())
+
+                if idx % 500 == 0:
+                    print_info(f"Validated {idx}/{len(drug_data)} records")
+
+            except Exception as e:
+                logger.debug(f"Validation error for record {idx}: {e}")
+                stats["validation_errors"] += 1
+                stats["errors"] += 1
+
+        print_success(f"Validated {len(valid_records)} records")
+
+        if not valid_records:
+            print_warning("No valid records after validation")
+            client.close()
+            return stats
+
+        # Bulk upsert records to MongoDB
+        print_info(f"Upserting {len(valid_records)} records to 'drugs' collection...")
+
+        try:
+            # Create upsert operations based on RXCUI (unique identifier)
+            operations = [
+                UpdateOne(
+                    {"ingredient_rxcui": record.get("ingredient_rxcui")},
+                    {"$set": record},
+                    upsert=True,
+                )
+                for record in valid_records
+            ]
+
+            if operations:
+                result = collection.bulk_write(operations, ordered=False)
+                inserted = result.upserted_count + result.modified_count
+                stats["drugs_ingested"] = inserted
+
+                logger.debug(
+                    f"Drugs: {result.upserted_count} upserted, " f"{result.modified_count} modified"
+                )
+
+        except BulkWriteError as bwe:
+            print_warning(
+                f"Partial bulk write for drugs: {bwe.details.get('nInserted', 0)} inserted"
+            )
+            stats["drugs_ingested"] += bwe.details.get("nInserted", 0)
+            stats["errors"] += 1
+
+        print()
+
+        # Print summary statistics
+        print_header("DRUG INGESTION COMPLETE")
+
+        print_success(f"Ingested {stats['drugs_ingested']} drug records")
+
+        if stats["validation_errors"] > 0:
+            print_warning(f"Encountered {stats['validation_errors']} validation errors")
+
+        if stats["errors"] > 0:
+            print_warning(f"Total errors: {stats['errors']}")
+        else:
+            print_success("No errors encountered")
+
+        print(f"\n{Colors.OKGREEN}Collection: drugs{Colors.ENDC}")
+        print(f"{Colors.OKGREEN}Database: {db_name}{Colors.ENDC}\n")
+
+        return stats
+
+    except Exception as e:
+        print_error(f"Drug ingestion failed: {e}")
+        logger.exception("Detailed error for drug ingestion")
+        stats["errors"] += 1
+        return stats
+
+    finally:
+        # Close connection
+        client.close()
 
 
 def main() -> None:

@@ -29,6 +29,7 @@ The system generates comprehensive, correlated patient data in FHIR R4 format. D
 - **DiagnosticReports**: Lab and diagnostic test reports → `diagnosticreports` collection
 - **Claims**: Insurance claims data → `claims` collection
 - **ExplanationOfBenefits**: Insurance benefit explanations → `explanationofbenefits` collection
+- **Drugs**: Drug ingredients with ATC classifications from RxNav API → `drugs` collection
 
 ### Data Correlation
 
@@ -39,51 +40,64 @@ See the [MongoDB Collections](#-mongodb-collections) section below for detailed 
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐
-│   Synthea   │ ──> Generates FHIR R4 Bundles
-│  (Docker)   │     (Patient data with all resources)
-└─────────────┘
-       │
-       ↓
-┌─────────────────┐
-│ Data Ingestion  │ ──> Parses & Separates by Resource Type
-│   Pipeline      │     (Groups resources by resourceType)
-└─────────────────┘
-       │
-       ↓
-┌─────────────────────────────────────┐
-│         MongoDB Collections          │
-│  ┌──────────┐  ┌──────────┐         │
-│  │ patients │  │encounters │  ...    │
-│  └──────────┘  └──────────┘         │
-│  ┌──────────┐  ┌──────────┐         │
-│  │conditions│  │observations│        │
-│  └──────────┘  └──────────┘         │
-│  ┌──────────┐  ┌──────────┐         │
-│  │medication│  │procedures│  ...   │
-│  │ requests │  └──────────┘         │
-│  └──────────┘                       │
-│  (12+ Collections, Auto-Separated)  │
-└─────────────────────────────────────┘
-       │
-       ↓
-┌─────────────────┐
-│ MCP AI Agents   │ ──> NL to MongoDB Query
-└─────────────────┘
+┌─────────────────────────────────────────────────┐
+│                  Data Sources                   │
+│  ┌──────────────┐              ┌──────────────┐ │
+│  │   Synthea    │              │   RxNav API  │ │
+│  │   (Docker)   │              │ (RxNorm Data)│ │
+│  └──────────────┘              └──────────────┘ │
+└─────────────────────────────────────────────────┘
+       │                                  │
+       │ Generates FHIR R4 Bundles       │ Extracts Drug Data
+       │                                  │
+       ↓                                  ↓
+┌─────────────────┐              ┌──────────────────┐
+│FHIR Ingestion   │              │Drug Ingestion    │
+│   Pipeline      │              │   Pipeline       │
+└─────────────────┘              └──────────────────┘
+       │                                  │
+       │ Parses & Separates by Type      │ Validates & Ingests
+       │                                  │
+       ↓                                  ↓
+┌─────────────────────────────────────────────────┐
+│         MongoDB Collections                     │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ patients │  │encounters│  │  drugs   │ ...  │
+│  └──────────┘  └──────────┘  └──────────┘      │
+│  ┌──────────┐  ┌──────────┐                    │
+│  │conditions│  │observations│  (13+ Collections)
+│  └──────────┘  └──────────┘                    │
+│  ┌──────────┐  ┌──────────┐                    │
+│  │medication│  │procedures│  ...               │
+│  │ requests │  └──────────┘                    │
+│  └──────────┘                                  │
+└─────────────────────────────────────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────────────────┐
+│ MCP AI Agents: NL to MongoDB Query              │
+└─────────────────────────────────────────────────┘
 ```
 
 ### Data Flow Details
 
 1. **Synthea Generation**: Synthea Docker generates realistic patient data in FHIR R4 format. Each patient bundle contains multiple resource types (Patient, Encounter, Condition, Observation, MedicationRequest, etc.) all in a single JSON file.
 
-2. **Automatic Separation**: The ingestion script (`ingest.py`) automatically:
+2. **FHIR Ingestion**: The ingestion script (`ingest.py`) automatically:
    - Reads each FHIR bundle file
    - Extracts all resources from the bundle
    - Groups resources by their `resourceType` field
    - Maps each resource type to its corresponding MongoDB collection
    - Performs bulk inserts for optimal performance
 
-3. **Collection Organization**: Resources are stored in separate collections based on their type, enabling:
+3. **Drug Data Ingestion**: After FHIR data ingestion, the pipeline automatically:
+   - Calls the RxNav API to extract drug ingredient data
+   - Retrieves ATC (Anatomical Therapeutic Chemical) classifications
+   - Validates data using Pydantic models
+   - Stores clean, structured drug data in the `drugs` collection
+   - Creates optimized indexes for efficient querying
+
+4. **Collection Organization**: Resources are stored in separate collections based on their type, enabling:
    - Efficient querying (query only what you need)
    - Optimized indexing per collection
    - Clear data organization
@@ -199,6 +213,7 @@ After ingestion, FHIR resources are automatically separated into dedicated Mongo
 | **`diagnosticreports`** | Lab and diagnostic test reports | Test results, interpretations, ordering physicians | 600+ |
 | **`claims`** | Insurance claims data | Claim numbers, billing codes, amounts, status | Variable |
 | **`explanationofbenefits`** | Insurance benefit explanations | Coverage details, payments, adjustments | Variable |
+| **`drugs`** | RxNorm drug ingredients with ATC classifications | RxCUI, drug name, therapeutic/drug/chemical classes | 10000+ |
 
 ### Detailed Collection Purposes
 
@@ -343,6 +358,61 @@ After ingestion, FHIR resources are automatically separated into dedicated Mongo
 - Insurance plan information
 
 **Use Cases**: Benefits analysis, cost tracking, insurance verification
+
+#### `drugs` Collection
+**Purpose**: Repository of standardized drug ingredient data from RxNorm with ATC classifications.
+
+**Contains**:
+- RxCUI (RxNorm Concept Unique Identifier) - primary key linking to RxNorm database
+- Primary drug name - standardized ingredient name from RxNorm
+- ATC Level 2 classification - therapeutic subgroup (e.g., Antithrombotic agents)
+- ATC Level 3 classification - pharmacological subgroup
+- ATC Level 4 classification - chemical subgroup (most specific ATC level)
+- Ingestion metadata - timestamp and version information
+
+**Indexes**: `ingredient_rxcui` (unique), `primary_drug_name`, `therapeutic_class_l2`, `drug_class_l3`
+
+**Use Cases**: Drug reference lookups, therapeutic classification analysis, medication interaction studies, drug discovery research
+
+**Data Source**: Extracted from RxNav API (National Library of Medicine) during pipeline execution
+
+**Sample Document**:
+```json
+{
+  "ingredient_rxcui": "5640",
+  "primary_drug_name": "Aspirin",
+  "therapeutic_class_l2": "Antithrombotic agents",
+  "drug_class_l3": "Platelet aggregation inhibitors excl. heparin",
+  "drug_subclass_l4": "Salicylic acid and derivatives",
+  "ingestion_metadata": {
+    "ingested_at": "2024-01-15T10:30:00+00:00",
+    "ingestion_version": "1.0",
+    "source": "rxnav"
+  }
+}
+```
+
+**Sample Queries**:
+```javascript
+// Find all beta-blockers (ATC: C07AB)
+db.drugs.find({
+  "drug_subclass_l4": /C07AB/
+}).limit(10)
+
+// Find drugs in a therapeutic class
+db.drugs.find({
+  "therapeutic_class_l2": "Antithrombotic agents"
+}).count()
+
+// Get drug classification hierarchy
+db.drugs.aggregate([
+  {$group: {
+    _id: "$therapeutic_class_l2",
+    count: {$sum: 1}
+  }},
+  {$sort: {count: -1}}
+])
+```
 
 ### How Data Separation Works
 
