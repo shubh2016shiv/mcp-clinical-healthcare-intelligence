@@ -348,30 +348,30 @@ def ingest_data(synthea_output_dir: Path) -> bool:
 
 def ingest_drug_data() -> bool:
     """Ingest RxNav drug data with ATC classifications."""
-    print_header("INGESTING RXNAV DRUG DATA")
+    print_header("[INFO] INGESTING RXNAV DRUG DATA")
 
     try:
         from healthcare_data_pipeline.ingest import ingest_drug_data as ingest_drugs
 
-        print_info("Starting RxNav drug data ingestion (5-10 minutes)...\n")
+        print_info("[INFO] Starting RxNav drug data ingestion (5-10 minutes)...\n")
 
         stats = ingest_drugs()
 
         if stats.get("errors", 0) > 0:
-            print_warning(f"Drug ingestion completed with {stats['errors']} error(s)")
+            print_warning(f"[WARNING] Drug ingestion completed with {stats['errors']} error(s)")
         else:
-            print_success("Drug data ingestion completed successfully")
+            print_success("[SUCCESS] Drug data ingestion completed successfully")
 
         return True
 
     except ImportError as e:
-        print_warning(f"Could not import drug ingestion module: {e}")
-        print_info("Continuing without drug data")
+        print_warning(f"[WARNING] Could not import drug ingestion module: {e}")
+        print_info("[INFO] Continuing without drug data")
         return True
 
     except Exception as e:
-        print_warning(f"Drug ingestion failed: {e}")
-        print_info("Continuing without drug data")
+        print_warning(f"[WARNING] Drug ingestion failed: {e}")
+        print_info("[INFO] Continuing without drug data")
         return True
 
 
@@ -382,8 +382,8 @@ def transform_data(gemini_api_key: str | None = None, use_gemini: bool = True) -
     transform_script = Path(__file__).parent / "transform.py"
 
     if not transform_script.exists():
-        print_error(f"Transformation script not found: {transform_script}")
-        print_info("Please ensure transform.py is in the same directory")
+        print_error(f"[ERROR] Transformation script not found: {transform_script}")
+        print_info("[INFO] Please ensure transform.py is in the same directory")
         return False
 
     try:
@@ -400,24 +400,24 @@ def transform_data(gemini_api_key: str | None = None, use_gemini: bool = True) -
                         "GOOGLE_API_KEY"
                     )
                     if gemini_api_key:
-                        print_info("✅ Loaded Gemini API key from .env file")
+                        print_info("[INFO] Loaded Gemini API key from .env file")
             except ImportError:
                 pass
             except Exception as e:
-                print_warning(f"Could not load .env: {e}")
+                print_warning(f"[WARNING] Could not load .env: {e}")
 
         cmd = [sys.executable, str(transform_script)]
 
         # Always try to use Gemini if key is available
         if gemini_api_key:
             cmd.extend(["--gemini-key", gemini_api_key])
-            print_info("🔧 Running with Gemini enrichment (will retry on failures)")
+            print_info("[INFO] Running with Gemini enrichment (will retry on failures)")
         else:
             if use_gemini:
-                print_warning("⚠️  Gemini API key not found in .env or command line")
-                print_info("🔧 Running transformation without enrichment")
+                print_warning("[WARNING]  Gemini API key not found in .env or command line")
+                print_info("[INFO] Running transformation without enrichment")
             else:
-                print_info("🔧 Running transformation without enrichment (--no-gemini flag)")
+                print_info("[INFO] Running transformation without enrichment (--no-gemini flag)")
 
         print_info(f"Running transformation script: {transform_script}\n")
 
@@ -429,17 +429,17 @@ def transform_data(gemini_api_key: str | None = None, use_gemini: bool = True) -
         )
 
         if result.returncode != 0:
-            print_error("Data transformation failed")
+            print_error("[ERROR] Data transformation failed")
             return False
 
-        print_success("Data transformation complete")
+        print_success("[SUCCESS] Data transformation complete")
         return True
 
     except subprocess.TimeoutExpired:
-        print_error("Data transformation timed out")
+        print_error("[ERROR] Data transformation timed out")
         return False
     except Exception as e:
-        print_error(f"Error running transformation script: {e}")
+        print_error(f"[ERROR] Error running transformation script: {e}")
         return False
 
 
@@ -480,7 +480,7 @@ def verify_data(
             "clean_medications",
         ]
 
-        print_info("Raw FHIR Collections:")
+        print_info("[INFO] Raw FHIR Collections:")
         raw_total = 0
         for collection_name in raw_collections:
             if collection_name in db.list_collection_names():
@@ -491,7 +491,7 @@ def verify_data(
 
         if check_clean:
             print()
-            print_info("Clean Medical Record Collections:")
+            print_info("[INFO] Clean Medical Record Collections:")
             clean_total = 0
             for collection_name in clean_collections:
                 if collection_name in db.list_collection_names():
@@ -501,12 +501,14 @@ def verify_data(
                         clean_total += count
 
             if clean_total == 0:
-                print_warning("No clean collections found - transformation may have failed")
+                print_warning(
+                    "[WARNING] No clean collections found - transformation may have failed"
+                )
 
         client.close()
 
         if raw_total == 0:
-            print_warning("No data found in any collections")
+            print_warning("[WARNING] No data found in any collections")
             return False
 
         print()
@@ -514,10 +516,10 @@ def verify_data(
         return True
 
     except ImportError:
-        print_error("pymongo not installed. Run: pip install pymongo")
+        print_error("[ERROR] pymongo not installed. Run: pip install pymongo")
         return False
     except Exception as e:
-        print_error(f"Verification failed: {e}")
+        print_error(f"[ERROR] Verification failed: {e}")
         return False
 
 

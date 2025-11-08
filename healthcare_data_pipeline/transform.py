@@ -320,7 +320,7 @@ class GeminiEnricher:
         self.base_retry_delay = 1.0
         self.retry_multiplier = 2.0
 
-        logger.info(f"✅ Gemini initialized successfully with model: {model}")
+        logger.info(f"[INFO] Gemini initialized successfully with model: {model}")
 
     def _call_gemini_with_retry(self, prompt: str, operation_name: str = "API call") -> str | None:
         """Call Gemini API with exponential backoff retry.
@@ -341,7 +341,7 @@ class GeminiEnricher:
 
                 if response and response.text:
                     if attempt > 0:
-                        logger.debug(f"✅ {operation_name} succeeded on attempt {attempt + 1}")
+                        logger.debug(f"[INFO] {operation_name} succeeded on attempt {attempt + 1}")
                     return response.text.strip()
 
             except Exception as e:
@@ -361,19 +361,19 @@ class GeminiEnricher:
                 )
 
                 if not is_retryable:
-                    logger.debug(f"❌ {operation_name} failed (non-retryable): {e}")
+                    logger.debug(f"[ERROR] {operation_name} failed (non-retryable): {e}")
                     return None
 
                 if attempt < self.max_retries - 1:
                     delay = self.base_retry_delay * (self.retry_multiplier**attempt)
                     logger.debug(
-                        f"⏳ {operation_name} attempt {attempt + 1} failed: {e}. "
+                        f"[INFO] {operation_name} attempt {attempt + 1} failed: {e}. "
                         f"Retrying in {delay:.1f}s..."
                     )
                     time.sleep(delay)
                 else:
                     logger.debug(
-                        f"❌ {operation_name} failed after {self.max_retries} attempts: {e}"
+                        f"[ERROR] {operation_name} failed after {self.max_retries} attempts: {e}"
                     )
 
         return None
@@ -1050,22 +1050,24 @@ class FHIRTransformationPipeline:
         if use_gemini and gemini_api_key:
             try:
                 self.gemini = GeminiEnricher(gemini_api_key)
-                logger.info("✅ Gemini enrichment enabled and verified")
+                logger.info("[INFO] Gemini enrichment enabled and verified")
             except ValueError as e:
-                logger.error(f"❌ GEMINI INITIALIZATION FAILED: {e}")
-                logger.error("   This is likely due to:")
-                logger.error("   1. Invalid API key")
-                logger.error("   2. Incorrect model name")
-                logger.error("   3. API connectivity issues")
-                logger.warning("   Continuing without Gemini enrichment")
+                logger.error(f"[ERROR] GEMINI INITIALIZATION FAILED: {e}")
+                logger.error("[ERROR] This is likely due to:")
+                logger.error("[ERROR]   1. Invalid API key")
+                logger.error("[ERROR]   2. Incorrect model name")
+                logger.error("[ERROR]   3. API connectivity issues")
+                logger.warning("[WARNING] Continuing without Gemini enrichment")
                 self.gemini = None
             except Exception as e:
-                logger.error(f"❌ UNEXPECTED ERROR initializing Gemini: {type(e).__name__}: {e}")
-                logger.warning("   Continuing without Gemini enrichment")
+                logger.error(
+                    f"[ERROR] UNEXPECTED ERROR initializing Gemini: {type(e).__name__}: {e}"
+                )
+                logger.warning("[WARNING] Continuing without Gemini enrichment")
                 self.gemini = None
         else:
             if use_gemini and not gemini_api_key:
-                logger.warning("⚠️  Gemini enrichment requested but no API key provided")
+                logger.warning("[WARNING] Gemini enrichment requested but no API key provided")
             self.gemini = None
 
         self.enrichment_stats = {
@@ -1103,7 +1105,7 @@ class FHIRTransformationPipeline:
                 f"Helper functions must be defined before the pipeline class."
             )
 
-        logger.debug("✅ All helper functions validated and available")
+        logger.debug("[INFO] All helper functions validated and available")
 
     def transform_collection(
         self,
@@ -1134,10 +1136,12 @@ class FHIRTransformationPipeline:
         total_docs = source_coll.count_documents({})
 
         if total_docs == 0:
-            logger.info(f"No documents in {source_collection}, skipping")
+            logger.info(f"[INFO] No documents in {source_collection}, skipping")
             return stats
 
-        logger.info(f"Transforming {source_collection} -> {target_collection} ({total_docs} docs)")
+        logger.info(
+            f"[INFO] Transforming {source_collection} -> {target_collection} ({total_docs} docs)"
+        )
 
         batch = []
 
@@ -1221,7 +1225,7 @@ class FHIRTransformationPipeline:
                         },
                     )
                     logger.warning(
-                        f"Error transforming document in {source_collection} "
+                        f"[WARNING] Error transforming document in {source_collection} "
                         f"(doc_id={doc.get('_id', 'unknown')}): {type(e).__name__}: {str(e)[:200]}"
                     )
 
@@ -1477,7 +1481,7 @@ class FHIRTransformationPipeline:
 
         for collection, coll_stats in stats.items():
             if "error" in coll_stats:
-                print(f"❌ {collection}: ERROR - {coll_stats['error']}")
+                print(f"[ERROR] {collection}: ERROR - {coll_stats['error']}")
             else:
                 processed = coll_stats.get("processed", 0)
                 transformed = coll_stats.get("transformed", 0)
@@ -1489,7 +1493,7 @@ class FHIRTransformationPipeline:
                 total_skipped += skipped
                 total_errors += errors
 
-                print(f"✓ {collection}:")
+                print(f"[INFO] {collection}:")
                 print(f"  Processed: {processed}")
                 print(f"  Transformed: {transformed}")
                 print(f"  Skipped: {skipped}")
@@ -1531,14 +1535,14 @@ class FHIRTransformationPipeline:
         if not self.gemini or not self.enrichment_stats["collections"]:
             if self.gemini:
                 print("\n" + "=" * 80)
-                print("GEMINI ENRICHMENT STATISTICS".center(80))
+                print("[INFO] GEMINI ENRICHMENT STATISTICS".center(80))
                 print("=" * 80)
-                print("⚠️  No enrichment fields were added during transformation")
+                print("[WARNING] No enrichment fields were added during transformation")
                 print("=" * 80 + "\n")
             return
 
         print("\n" + "=" * 80)
-        print("GEMINI ENRICHMENT STATISTICS".center(80))
+        print("[INFO] GEMINI ENRICHMENT STATISTICS".center(80))
         print("=" * 80 + "\n")
 
         print(f"Total Enriched Documents: {self.enrichment_stats['total_enriched_docs']:,}")
@@ -1665,7 +1669,7 @@ Examples:
             use_gemini=use_gemini,
         )
     except RuntimeError as e:
-        logger.error(f"❌ Pipeline initialization failed: {e}")
+        logger.error(f"[ERROR] Pipeline initialization failed: {e}")
         logger.error("This is a critical code organization error.")
         sys.exit(1)
 
@@ -1684,21 +1688,21 @@ Examples:
 
                     all_stats[collection] = stats
                 else:
-                    logger.warning(f"Unknown collection: {collection}")
+                    logger.warning(f"[WARNING] Unknown collection: {collection}")
         else:
             all_stats = pipeline.transform_all()
 
         pipeline.create_indexes()
         pipeline.print_summary(all_stats)
 
-        logger.info("Transformation complete!")
+        logger.info("[INFO] Transformation complete!")
 
     except KeyboardInterrupt:
-        logger.warning("Transformation cancelled by user")
+        logger.warning("[WARNING] Transformation cancelled by user")
         sys.exit(130)
 
     except Exception as e:
-        logger.error(f"Transformation failed: {type(e).__name__}: {e}")
+        logger.error(f"[ERROR] Transformation failed: {type(e).__name__}: {e}")
         import traceback
 
         traceback.print_exc()
