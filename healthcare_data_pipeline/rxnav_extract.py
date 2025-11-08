@@ -66,7 +66,7 @@ class RxNavHttpClient:
 
     def __init__(
         self,
-        request_delay: float = 0.9,
+        request_delay: float = 0.3,
         request_timeout: float = 40.0,
         max_retries: int = 3,
         backoff_multiplier: float = 1.8,
@@ -74,7 +74,7 @@ class RxNavHttpClient:
         """Initialize HTTP client with configurable parameters.
 
         Args:
-            request_delay: Delay between requests in seconds
+            request_delay: Delay between requests in seconds (reduced from 0.9 for efficiency)
             request_timeout: Request timeout in seconds
             max_retries: Maximum retry attempts
             backoff_multiplier: Exponential backoff factor
@@ -414,7 +414,8 @@ def fetch_ingredient_members(
 
 def extract_drug_data(
     atc_root_categories: list[str] | None = None,
-    request_delay: float = 0.9,
+    request_delay: float = 0.3,
+    max_concurrent: int = 4,
 ) -> list[dict[str, Any]]:
     """Extract drug ingredient and ATC classification data from RxNav API.
 
@@ -422,10 +423,16 @@ def extract_drug_data(
     retrieves all drug ingredients and their ATC classifications, returning
     them as a list of dictionaries ready for ingestion into MongoDB.
 
+    Optimized with concurrent requests and reduced delays for faster extraction
+    while remaining respectful of API rate limits.
+
     Args:
         atc_root_categories: List of ATC Level 1 root categories to process.
             Defaults to all available categories (A-V).
         request_delay: Seconds to wait between API requests for rate limiting.
+            Reduced default from 0.9 to 0.3 seconds for efficiency.
+        max_concurrent: Maximum concurrent requests for ingredient fetching.
+            Defaults to 4 to balance speed and API respect.
 
     Returns:
         List of dictionaries with keys: ingredient_rxcui, primary_drug_name,
@@ -443,21 +450,35 @@ def extract_drug_data(
     try:
         processed_entries: set = set()
 
-        logger.info(f"Starting RxNav extraction for {len(atc_root_categories)} root categories")
+        logger.info(
+            f"Starting RxNav extraction for {len(atc_root_categories)} root categories "
+            f"(delay={request_delay}s, concurrent={max_concurrent})"
+        )
 
-        for root_category in tqdm(atc_root_categories, desc="Processing ATC roots"):
+        # First pass: collect all Level 4 ATC codes
+        atc_level_4_tasks = []
+
+        for root_category in tqdm(atc_root_categories, desc="Collecting ATC codes"):
             try:
                 classification_tree = fetch_atc_classification_tree(http_client, root_category)
-                traverse_and_extract_tree(
-                    http_client,
+                level_4_codes = collect_atc_level_4_codes(
                     classification_tree,
-                    drug_data,
                     processed_entries,
                 )
-
+                atc_level_4_tasks.extend(level_4_codes)
             except Exception as error:
                 logger.error(f"Failed to process root {root_category}: {error}")
                 continue
+
+        logger.info(f"Found {len(atc_level_4_tasks)} ATC Level 4 codes to process")
+
+        # Second pass: fetch ingredients concurrently
+        if atc_level_4_tasks:
+            drug_data = fetch_ingredients_concurrently(
+                http_client,
+                atc_level_4_tasks,
+                max_concurrent,
+            )
 
         logger.info(f"Extraction complete: {len(drug_data)} drug records extracted")
         return drug_data
@@ -466,36 +487,30 @@ def extract_drug_data(
         http_client.close()
 
 
-def traverse_and_extract_tree(
-    http_client: RxNavHttpClient,
+def collect_atc_level_4_codes(
     classification_tree: dict[str, Any],
-    drug_data: list[dict[str, Any]],
     processed_entries: set,
-) -> None:
-    """Traverse ATC classification tree and extract ingredient mappings.
+) -> list[dict[str, Any]]:
+    """Collect all ATC Level 4 codes with their hierarchy context.
 
-    Performs depth-first traversal of the classification tree, extracting
-    ingredient-to-classification mappings at ATC Level 4.
+    Performs depth-first traversal to collect Level 4 codes without making
+    API calls, storing hierarchy context for later ingredient fetching.
 
     Args:
-        http_client: Configured HTTP client
         classification_tree: Root of classification tree
-        drug_data: List to accumulate extracted drug records
-        processed_entries: Set of processed (rxcui, atc_code) tuples to avoid duplicates
+        processed_entries: Set to track processed codes (for deduplication)
+
+    Returns:
+        List of dictionaries with atc_code, atc_name, level_2, level_3
     """
+    level_4_codes = []
 
     def depth_first_search(
         current_node: dict[str, Any],
         level_2_classification: str | None,
         level_3_classification: str | None,
     ) -> None:
-        """Recursively traverse classification tree nodes.
-
-        Args:
-            current_node: Current tree node
-            level_2_classification: Current ATC Level 2 name
-            level_3_classification: Current ATC Level 3 name
-        """
+        """Recursively traverse classification tree nodes."""
         classification = extract_node_classification(current_node)
 
         if classification:
@@ -507,34 +522,22 @@ def traverse_and_extract_tree(
                 atc_code, atc_name, level_2_classification, level_3_classification
             )
 
-            # Process Level 4 classifications (leaf nodes with ingredients)
+            # Collect Level 4 classifications
             if ATC_LEVEL_4_PATTERN.match(atc_code):
-                try:
-                    ingredient_members = fetch_ingredient_members(http_client, atc_code)
+                # Use code as key to avoid duplicates across roots
+                code_key = atc_code
+                if code_key not in processed_entries:
+                    processed_entries.add(code_key)
+                    level_4_codes.append(
+                        {
+                            "atc_code": atc_code,
+                            "atc_name": atc_name,
+                            "level_2": updated_level_2 or "",
+                            "level_3": updated_level_3 or "",
+                        }
+                    )
 
-                    for member in ingredient_members:
-                        entry_key = (member["rxcui"], atc_code)
-
-                        # Skip duplicates
-                        if entry_key in processed_entries:
-                            continue
-
-                        processed_entries.add(entry_key)
-
-                        drug_data.append(
-                            {
-                                "ingredient_rxcui": member["rxcui"],
-                                "primary_drug_name": member["name"],
-                                "therapeutic_class_l2": updated_level_2 or "",
-                                "drug_class_l3": updated_level_3 or "",
-                                "drug_subclass_l4": atc_name or atc_code,
-                            }
-                        )
-
-                except Exception as error:
-                    logger.error(f"Error processing ATC code {atc_code}: {error}")
-
-            # Continue traversing children with updated context
+            # Continue traversing children
             for child_node in extract_child_nodes(current_node):
                 depth_first_search(child_node, updated_level_2, updated_level_3)
         else:
@@ -550,3 +553,109 @@ def traverse_and_extract_tree(
             depth_first_search(root_node, None, None)
     elif isinstance(root_nodes, dict):
         depth_first_search(root_nodes, None, None)
+
+    return level_4_codes
+
+
+def fetch_ingredients_concurrently(
+    http_client: RxNavHttpClient,
+    atc_tasks: list[dict[str, Any]],
+    max_concurrent: int = 4,
+) -> list[dict[str, Any]]:
+    """Fetch ingredients for ATC Level 4 codes with controlled concurrency.
+
+    Uses threading to fetch multiple ingredient lists concurrently while
+    respecting API rate limits through a semaphore.
+
+    Args:
+        http_client: Configured HTTP client
+        atc_tasks: List of ATC Level 4 code dictionaries with hierarchy
+        max_concurrent: Maximum concurrent requests
+
+    Returns:
+        List of drug data dictionaries
+    """
+    import threading
+    from queue import Empty, Queue
+
+    drug_data = []
+    drug_data_lock = threading.Lock()
+    processed_entries: set = set()
+    entries_lock = threading.Lock()
+    semaphore = threading.Semaphore(max_concurrent)
+    task_queue = Queue()
+
+    # Add all tasks to queue
+    for task in atc_tasks:
+        task_queue.put(task)
+
+    def worker():
+        """Worker thread to process ATC codes."""
+        while True:
+            try:
+                task = task_queue.get_nowait()
+            except Empty:
+                break
+
+            atc_code = task["atc_code"]
+            atc_name = task["atc_name"]
+            level_2 = task["level_2"]
+            level_3 = task["level_3"]
+
+            with semaphore:
+                try:
+                    ingredient_members = fetch_ingredient_members(http_client, atc_code)
+
+                    with drug_data_lock, entries_lock:
+                        for member in ingredient_members:
+                            entry_key = (member["rxcui"], atc_code)
+
+                            # Skip duplicates
+                            if entry_key in processed_entries:
+                                continue
+
+                            processed_entries.add(entry_key)
+
+                            drug_data.append(
+                                {
+                                    "ingredient_rxcui": member["rxcui"],
+                                    "primary_drug_name": member["name"],
+                                    "therapeutic_class_l2": level_2,
+                                    "drug_class_l3": level_3,
+                                    "drug_subclass_l4": atc_name or atc_code,
+                                }
+                            )
+
+                except Exception as error:
+                    logger.debug(f"Error processing ATC code {atc_code}: {error}")
+
+            task_queue.task_done()
+
+    # Start worker threads
+    threads = []
+    num_workers = min(max_concurrent, len(atc_tasks))
+
+    for _ in range(num_workers):
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        threads.append(thread)
+
+    # Wait for all tasks with progress bar
+    with tqdm(total=len(atc_tasks), desc="Fetching ingredients") as pbar:
+        initial_size = len(atc_tasks)
+        while not task_queue.empty():
+            time.sleep(0.2)
+            remaining = task_queue.qsize()
+            completed = initial_size - remaining
+            pbar.n = completed
+            pbar.refresh()
+
+        task_queue.join()
+        pbar.n = initial_size
+        pbar.refresh()
+
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join(timeout=5)
+
+    return drug_data

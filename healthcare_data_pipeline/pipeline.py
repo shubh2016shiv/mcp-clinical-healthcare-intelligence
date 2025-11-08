@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Healthcare Data Generation and Ingestion Orchestrator
+Healthcare Data Pipeline - Complete Workflow
 
-Fixed version that properly handles Docker Compose command arguments.
+Enhanced version that includes FHIR data transformation to clean medical records.
+Orchestrates: Infrastructure -> Data Generation -> Ingestion -> Transformation
 """
 
 import argparse
-import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -194,49 +195,29 @@ def check_synthea_image() -> bool:
 
 
 def generate_synthea_data(num_patients: int, state: str, output_dir: Path) -> bool:
-    """
-    Generate synthetic healthcare data using Synthea Docker directly.
-
-    This bypasses docker-compose and runs Synthea directly with docker run.
-    """
+    """Generate synthetic healthcare data using Synthea Docker."""
     print_header("GENERATING SYNTHETIC HEALTHCARE DATA")
     print_info(f"Patients: {num_patients}")
     print_info(f"State: {state}\n")
 
-    # Check and pull Synthea image if needed
     if not check_synthea_image():
         print_error("Cannot proceed without Synthea image")
         return False
     print()
 
-    # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run Synthea using docker run (more reliable than docker-compose for this)
     print_info("Running Synthea Docker container...")
     print_warning("This may take several minutes depending on the number of patients")
     print_info(f"Output directory: {output_dir.absolute()}\n")
 
     try:
-        # Use docker run with Java to download and run Synthea Java JAR
-        # Synthea JAR will be downloaded from GitHub releases
         output_path = str(output_dir.absolute())
-        # On Windows, Docker Desktop needs forward slashes or proper escaping
         if sys.platform == "win32":
-            # Convert Windows path to Docker-friendly format
-            # Docker Desktop on Windows can handle both formats, but forward slashes are safer
             output_path = output_path.replace("\\", "/")
-            # If path has spaces, ensure it's properly quoted in the volume mount
-            if " " in output_path:
-                # Docker handles spaces in paths, but we'll use the path as-is
-                pass
 
-        # Download Synthea JAR and run it
-        # Using the latest release from GitHub
         synthea_jar_url = "https://github.com/synthetichealth/synthea/releases/download/master-branch-latest/synthea-with-dependencies.jar"
 
-        # Synthea outputs to output/fhir/ by default
-        # We run from /output directory, and Synthea will create fhir/ subdirectory
         cmd = [
             "docker",
             "run",
@@ -256,13 +237,12 @@ def generate_synthea_data(num_patients: int, state: str, output_dir: Path) -> bo
         ]
 
         print_info("Executing: docker run with Java to run Synthea\n")
-        print_info("Downloading Synthea JAR from GitHub and generating data...\n")
 
         result = subprocess.run(
             cmd,
-            capture_output=False,  # Show Synthea output in real-time
+            capture_output=False,
             text=True,
-            timeout=1800,  # 30 minute timeout for large datasets
+            timeout=1800,
         )
 
         if result.returncode != 0:
@@ -271,18 +251,15 @@ def generate_synthea_data(num_patients: int, state: str, output_dir: Path) -> bo
 
         print()
         print_success("Synthea data generation complete")
-
-        # Wait a moment for file system to sync (especially on Windows)
         time.sleep(2)
 
-        # Verify data was generated - check multiple possible locations
-        # Synthea creates output/fhir/ inside the mounted directory
+        # Verify data
         possible_dirs = [
-            output_dir / "fhir",  # Direct fhir/ subdirectory
-            output_dir / "output" / "fhir",  # Synthea's output/fhir/ structure
-            output_dir / "fhir_r4",  # Alternative naming
-            output_dir / "output" / "fhir_r4",  # Alternative with output/
-            output_dir,  # Root directory
+            output_dir / "fhir",
+            output_dir / "output" / "fhir",
+            output_dir / "fhir_r4",
+            output_dir / "output" / "fhir_r4",
+            output_dir,
         ]
 
         fhir_files = []
@@ -298,23 +275,6 @@ def generate_synthea_data(num_patients: int, state: str, output_dir: Path) -> bo
 
         if not fhir_files:
             print_error("No FHIR files found after generation")
-            print_info(f"Checked directories: {[str(d) for d in possible_dirs]}")
-            print_info("This might be a Docker volume mount issue on Windows.")
-            print_info("Troubleshooting steps:")
-            print_info("  1. Check Docker Desktop File Sharing settings")
-            print_info("  2. Ensure the project directory is shared in Docker Desktop")
-            print_info(
-                '  3. Try running: docker run --rm -v "${PWD}/synthea_output:/output" eclipse-temurin:17-jdk ls -la /output'
-            )
-
-            # Try to check if directory exists but is empty
-            if output_dir.exists():
-                all_files = list(output_dir.rglob("*"))
-                if all_files:
-                    print_info(f"Found {len(all_files)} files/directories in output folder:")
-                    for f in all_files[:10]:
-                        print_info(f"  - {f}")
-
             return False
 
         print_success(f"Generated {len(fhir_files)} FHIR bundle files in {fhir_dir}")
@@ -333,16 +293,14 @@ def generate_synthea_data(num_patients: int, state: str, output_dir: Path) -> bo
 
 def ingest_data(synthea_output_dir: Path) -> bool:
     """Ingest FHIR data into MongoDB using the ingestion script."""
-    print_header("INGESTING DATA INTO MONGODB")
+    print_header("INGESTING FHIR DATA INTO MONGODB")
 
-    # Check multiple possible locations for FHIR files
-    # Synthea may create output/fhir/ structure
     possible_dirs = [
-        synthea_output_dir / "fhir",  # Direct fhir/ subdirectory
-        synthea_output_dir / "output" / "fhir",  # Synthea's output/fhir/ structure
-        synthea_output_dir / "fhir_r4",  # Alternative naming
-        synthea_output_dir / "output" / "fhir_r4",  # Alternative with output/
-        synthea_output_dir,  # Root directory
+        synthea_output_dir / "fhir",
+        synthea_output_dir / "output" / "fhir",
+        synthea_output_dir / "fhir_r4",
+        synthea_output_dir / "output" / "fhir_r4",
+        synthea_output_dir,
     ]
 
     fhir_dir = None
@@ -354,13 +312,12 @@ def ingest_data(synthea_output_dir: Path) -> bool:
                 break
 
     if not fhir_dir:
-        print_error(f"FHIR directory not found. Checked: {[str(d) for d in possible_dirs]}")
+        print_error("FHIR directory not found")
         return False
 
     ingestion_script = Path(__file__).parent / "ingest.py"
     if not ingestion_script.exists():
         print_error(f"Ingestion script not found: {ingestion_script}")
-        print_info(f"Expected location: {ingestion_script}")
         return False
 
     try:
@@ -369,7 +326,7 @@ def ingest_data(synthea_output_dir: Path) -> bool:
 
         result = subprocess.run(
             [sys.executable, str(ingestion_script), str(fhir_dir)],
-            capture_output=False,  # Show output in real-time
+            capture_output=False,
             text=True,
             timeout=600,
         )
@@ -378,7 +335,7 @@ def ingest_data(synthea_output_dir: Path) -> bool:
             print_error("Data ingestion failed")
             return False
 
-        print_success("Data ingestion complete")
+        print_success("FHIR data ingestion complete")
         return True
 
     except subprocess.TimeoutExpired:
@@ -390,40 +347,77 @@ def ingest_data(synthea_output_dir: Path) -> bool:
 
 
 def ingest_drug_data() -> bool:
-    """Ingest RxNav drug data with ATC classifications into MongoDB.
-
-    Calls the drug ingestion function from ingest.py to extract and load
-    drug ingredient and ATC classification data from the RxNav API.
-    This step runs after Synthea ingestion and is non-critical (won't fail pipeline).
-    """
+    """Ingest RxNav drug data with ATC classifications."""
     print_header("INGESTING RXNAV DRUG DATA")
 
     try:
         from healthcare_data_pipeline.ingest import ingest_drug_data as ingest_drugs
 
-        print_info("Starting RxNav drug data ingestion (this may take 5-10 minutes)...\n")
+        print_info("Starting RxNav drug data ingestion (3-5 minutes with optimizations)...\n")
 
         stats = ingest_drugs()
 
         if stats.get("errors", 0) > 0:
             print_warning(f"Drug ingestion completed with {stats['errors']} error(s)")
-            print_info("Continuing pipeline (drug data is optional)")
-            return True
         else:
             print_success("Drug data ingestion completed successfully")
-            return True
+
+        return True
 
     except ImportError as e:
         print_warning(f"Could not import drug ingestion module: {e}")
-        print_info("Continuing pipeline without drug data")
+        print_info("Continuing without drug data")
         return True
 
     except Exception as e:
         print_warning(f"Drug ingestion failed: {e}")
-        print_info("Continuing pipeline without drug data")
-        logger_import = logging.getLogger(__name__)
-        logger_import.debug(f"Drug ingestion error details: {e}", exc_info=True)
+        print_info("Continuing without drug data")
         return True
+
+
+def transform_data(gemini_api_key: str | None = None, use_gemini: bool = True) -> bool:
+    """Transform FHIR data to clean medical records."""
+    print_header("TRANSFORMING TO CLEAN MEDICAL RECORDS")
+
+    transform_script = Path(__file__).parent / "transform.py"
+
+    if not transform_script.exists():
+        print_error(f"Transformation script not found: {transform_script}")
+        print_info("Please ensure transform.py is in the same directory")
+        return False
+
+    try:
+        cmd = [sys.executable, str(transform_script)]
+
+        if use_gemini and gemini_api_key:
+            cmd.extend(["--gemini-key", gemini_api_key])
+            print_info("Gemini enrichment enabled")
+        else:
+            cmd.append("--no-gemini")
+            print_info("Running without Gemini enrichment (faster)")
+
+        print_info(f"Running transformation script: {transform_script}\n")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=False,
+            text=True,
+            timeout=1800,  # 30 minutes
+        )
+
+        if result.returncode != 0:
+            print_error("Data transformation failed")
+            return False
+
+        print_success("Data transformation complete")
+        return True
+
+    except subprocess.TimeoutExpired:
+        print_error("Data transformation timed out")
+        return False
+    except Exception as e:
+        print_error(f"Error running transformation script: {e}")
+        return False
 
 
 def verify_data(
@@ -432,8 +426,9 @@ def verify_data(
     user: str = "admin",
     password: str = "mongopass123",
     db_name: str = "text_to_mongo_db",
+    check_clean: bool = True,
 ) -> bool:
-    """Verify data was ingested correctly by counting documents in collections."""
+    """Verify data was ingested and transformed correctly."""
     print_header("VERIFYING DATA")
 
     try:
@@ -442,44 +437,57 @@ def verify_data(
         connection_string = f"mongodb://{user}:{password}@{host}:{port}/{db_name}?authSource=admin"
         client = MongoClient(connection_string, serverSelectionTimeoutMS=5000)
 
-        # Test connection
         client.admin.command("ping")
         db = client[db_name]
 
         # Collections to verify
-        collections = [
+        raw_collections = [
             "patients",
             "encounters",
             "conditions",
             "observations",
             "medicationrequests",
-            "allergyintolerances",
-            "procedures",
-            "immunizations",
-            "careplans",
-            "diagnosticreports",
-            "drugs",
         ]
 
-        total_docs = 0
-        has_data = False
+        clean_collections = [
+            "clean_patients",
+            "clean_encounters",
+            "clean_conditions",
+            "clean_observations",
+            "clean_medications",
+        ]
 
-        for collection_name in collections:
+        print_info("Raw FHIR Collections:")
+        raw_total = 0
+        for collection_name in raw_collections:
             if collection_name in db.list_collection_names():
                 count = db[collection_name].count_documents({})
                 if count > 0:
-                    print_success(f"{collection_name}: {count:,} documents")
-                    total_docs += count
-                    has_data = True
+                    print_success(f"  {collection_name}: {count:,} documents")
+                    raw_total += count
+
+        if check_clean:
+            print()
+            print_info("Clean Medical Record Collections:")
+            clean_total = 0
+            for collection_name in clean_collections:
+                if collection_name in db.list_collection_names():
+                    count = db[collection_name].count_documents({})
+                    if count > 0:
+                        print_success(f"  {collection_name}: {count:,} documents")
+                        clean_total += count
+
+            if clean_total == 0:
+                print_warning("No clean collections found - transformation may have failed")
 
         client.close()
 
-        if not has_data:
+        if raw_total == 0:
             print_warning("No data found in any collections")
             return False
 
         print()
-        print_success(f"Total: {total_docs:,} documents ingested")
+        print_success("Verification complete - data is accessible")
         return True
 
     except ImportError:
@@ -507,29 +515,30 @@ def print_connection_details(
     print(f"  Database: {db_name}")
     print()
 
-    connection_string = f"mongodb://{user}:{password}@{host}:{port}/{db_name}?authSource=admin"
-    print(f"{Colors.BOLD}Connection String:{Colors.ENDC}")
-    print(f"  {connection_string}")
+    print(f"{Colors.BOLD}Clean Collections (Transformed Data):{Colors.ENDC}")
+    print("  • clean_patients - Patient demographics")
+    print("  • clean_conditions - Medical conditions/diagnoses")
+    print("  • clean_medications - Medication prescriptions")
+    print("  • clean_observations - Lab results & vital signs")
+    print("  • clean_allergies - Allergy information")
+    print("  • clean_immunizations - Vaccination records")
+    print("  • clean_procedures - Medical procedures")
+    print("  • clean_encounters - Healthcare visits")
+    print("  • clean_care_plans - Treatment plans")
     print()
 
-    print(f"{Colors.OKCYAN}{Colors.BOLD}Quick Commands:{Colors.ENDC}")
-    print("  Connect to MongoDB:")
-    print(
-        f"    docker exec -it text_to_mongo_db mongosh -u {user} -p {password} --authenticationDatabase admin {db_name}"
-    )
+    print(f"{Colors.OKCYAN}{Colors.BOLD}Sample Queries (Clean Data):{Colors.ENDC}")
+    print("  # Find all diabetic patients")
+    print("  db.clean_conditions.find({'condition_name': /Diabetes/i})")
     print()
-
-    print(f"{Colors.OKCYAN}{Colors.BOLD}Sample Queries:{Colors.ENDC}")
-    print("  # Count patients")
-    print("  db.patients.countDocuments()")
+    print("  # Get patient's complete medical record")
+    print("  patient_id = 'PATIENT_ID'")
+    print("  db.clean_conditions.find({'patient_id': patient_id})")
+    print("  db.clean_medications.find({'patient_id': patient_id})")
     print()
-    print("  # Find diabetic patients")
-    print("  db.conditions.find({'code.coding.display': /Diabetes/i}).limit(5)")
-    print()
-    print("  # Most common conditions")
-    print("  db.conditions.aggregate([")
-    print("    {$unwind: '$code.coding'},")
-    print("    {$group: {_id: '$code.coding.display', count: {$sum: 1}}},")
+    print("  # Count patients by condition")
+    print("  db.clean_conditions.aggregate([")
+    print("    {$group: {_id: '$condition_name', count: {$sum: 1}}},")
     print("    {$sort: {count: -1}},")
     print("    {$limit: 10}")
     print("  ])")
@@ -537,15 +546,23 @@ def print_connection_details(
 
 
 def main() -> None:
-    """Main entry point for the orchestration script."""
+    """Main entry point for the complete pipeline."""
     parser = argparse.ArgumentParser(
-        description="Healthcare Data Generation and Ingestion Pipeline",
+        description="Complete Healthcare Data Pipeline with Transformation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python pipeline.py 100 Massachusetts
-  python pipeline.py 500 California
-  python pipeline.py 50 Texas --skip-verify
+  # Full pipeline with Gemini enrichment
+  python pipeline.py 100 Massachusetts --gemini-key YOUR_KEY
+
+  # Full pipeline without Gemini (faster)
+  python pipeline.py 100 Massachusetts --no-gemini
+
+  # Skip transformation step
+  python pipeline.py 100 Massachusetts --skip-transform
+
+  # Only run transformation (data already ingested)
+  python pipeline.py --only-transform --gemini-key YOUR_KEY
         """,
     )
 
@@ -554,7 +571,7 @@ Examples:
         type=int,
         nargs="?",
         default=100,
-        help="Number of synthetic patients to generate (default: 100)",
+        help="Number of synthetic patients (default: 100)",
     )
     parser.add_argument(
         "state",
@@ -565,12 +582,37 @@ Examples:
     parser.add_argument(
         "--skip-infra",
         action="store_true",
-        help="Skip infrastructure startup (assumes already running)",
+        help="Skip infrastructure startup",
     )
     parser.add_argument(
-        "--skip-synthea", action="store_true", help="Skip Synthea generation (assume data exists)"
+        "--skip-synthea",
+        action="store_true",
+        help="Skip Synthea generation",
     )
-    parser.add_argument("--skip-verify", action="store_true", help="Skip data verification")
+    parser.add_argument(
+        "--skip-transform",
+        action="store_true",
+        help="Skip data transformation",
+    )
+    parser.add_argument(
+        "--only-transform",
+        action="store_true",
+        help="Only run transformation (skip generation/ingestion)",
+    )
+    parser.add_argument(
+        "--skip-verify",
+        action="store_true",
+        help="Skip data verification",
+    )
+    parser.add_argument(
+        "--gemini-key",
+        help="Google AI API key for Gemini enrichment",
+    )
+    parser.add_argument(
+        "--no-gemini",
+        action="store_true",
+        help="Disable Gemini enrichment",
+    )
 
     args = parser.parse_args()
 
@@ -580,7 +622,28 @@ Examples:
     infrastructure_dir = project_root / "infrastructure"
     synthea_output_dir = project_root / "synthea_output"
 
-    print_header("HEALTHCARE DATA GENERATION & INGESTION PIPELINE")
+    print_header("COMPLETE HEALTHCARE DATA PIPELINE")
+
+    # Check for Gemini API key from environment if not provided
+    if not args.no_gemini and not args.gemini_key:
+        args.gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if args.gemini_key:
+            print_info("Using Gemini API key from environment variable")
+
+    # If only transforming, skip to transformation
+    if args.only_transform:
+        print_info("Running transformation only (skipping generation/ingestion)\n")
+
+        if not transform_data(args.gemini_key, not args.no_gemini):
+            print_error("Transformation failed")
+            sys.exit(1)
+
+        if not args.skip_verify:
+            verify_data(check_clean=True)
+
+        print_connection_details()
+        print_success("Pipeline completed successfully!")
+        return
 
     # Pre-flight checks
     print_info("Running pre-flight checks...\n")
@@ -611,23 +674,29 @@ Examples:
     else:
         print_info("Skipping Synthea generation\n")
 
-    # Ingest data
+    # Ingest raw FHIR data
     if not ingest_data(synthea_output_dir):
         print_error("Failed to ingest data")
         sys.exit(1)
     print()
 
-    # Ingest drug data (optional, non-critical)
+    # Ingest drug data (optional)
     ingest_drug_data()
     print()
 
-    # Verify data
-    if not args.skip_verify:
-        if not verify_data():
-            print_warning("Data verification failed or found no data")
+    # Transform to clean medical records
+    if not args.skip_transform:
+        if not transform_data(args.gemini_key, not args.no_gemini):
+            print_warning("Transformation failed or incomplete")
+            print_info("Raw FHIR data is still available in original collections")
         print()
     else:
-        print_info("Skipping data verification\n")
+        print_info("Skipping data transformation\n")
+
+    # Verify data
+    if not args.skip_verify:
+        verify_data(check_clean=not args.skip_transform)
+        print()
 
     # Print connection details
     print_connection_details()

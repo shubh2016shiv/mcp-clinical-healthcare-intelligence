@@ -366,7 +366,7 @@ def ingest_fhir_data(
     }
 
     # Initialize statistics
-    stats = {collection: 0 for collection in resource_collections.values()}
+    stats = dict.fromkeys(resource_collections.values(), 0)
     stats["total_bundles"] = 0
     stats["total_resources"] = 0
     stats["errors"] = 0
@@ -475,7 +475,7 @@ def ingest_drug_data(
     port: int = 27017,
     user: str = "admin",
     password: str = "mongopass123",
-    request_delay: float = 0.9,
+    request_delay: float = 0.3,
 ) -> dict[str, int]:
     """Ingest RxNav drug data with ATC classifications into MongoDB.
 
@@ -573,7 +573,7 @@ def ingest_drug_data(
                 stats["drugs_ingested"] = inserted
 
                 logger.debug(
-                    f"Drugs: {result.upserted_count} upserted, " f"{result.modified_count} modified"
+                    f"Drugs: {result.upserted_count} upserted, {result.modified_count} modified"
                 )
 
         except BulkWriteError as bwe:
