@@ -205,7 +205,19 @@ def generate_synthea_data(num_patients: int, state: str, output_dir: Path) -> bo
         return False
     print()
 
+    # Delete existing synthea_output directory if it exists
+    if output_dir.exists():
+        print_info(f"Removing existing output directory: {output_dir}")
+        try:
+            shutil.rmtree(output_dir)
+            print_success("Existing output directory removed")
+        except Exception as e:
+            print_error(f"Failed to remove existing output directory: {e}")
+            return False
+
+    # Create fresh output directory
     output_dir.mkdir(parents=True, exist_ok=True)
+    print_success(f"Created fresh output directory: {output_dir}")
 
     print_info("Running Synthea Docker container...")
     print_warning("This may take several minutes depending on the number of patients")
@@ -523,6 +535,134 @@ def verify_data(
         return False
 
 
+def load_mongodb_config() -> dict:
+    """Load MongoDB configuration from .env file or use defaults.
+
+    Returns:
+        Dictionary with MongoDB configuration (host, port, user, password, db_name)
+    """
+    # Default configuration
+    mongodb_config = {
+        "host": "localhost",
+        "port": 27017,
+        "user": "admin",
+        "password": "mongopass123",
+        "db_name": "text_to_mongo_db",
+    }
+
+    try:
+        from dotenv import load_dotenv
+
+        project_root = Path(__file__).parent.parent
+        env_path = project_root / ".env"
+
+        if env_path.exists():
+            load_dotenv(env_path)
+            print_info("Loading MongoDB configuration from .env file")
+
+            # Load MongoDB URI or individual components
+            mongodb_uri = os.environ.get("MONGODB_URI")
+            if mongodb_uri:
+                # Parse URI if provided
+                from urllib.parse import urlparse
+
+                parsed = urlparse(mongodb_uri)
+                mongodb_config["host"] = parsed.hostname or mongodb_config["host"]
+                mongodb_config["port"] = parsed.port or mongodb_config["port"]
+                if parsed.username:
+                    mongodb_config["user"] = parsed.username
+                if parsed.password:
+                    mongodb_config["password"] = parsed.password
+                if parsed.path and parsed.path.strip("/"):
+                    mongodb_config["db_name"] = parsed.path.strip("/")
+
+            # Override with individual env vars if present
+            if os.environ.get("MONGODB_DATABASE"):
+                mongodb_config["db_name"] = os.environ.get("MONGODB_DATABASE")
+            if os.environ.get("MONGODB_USER"):
+                mongodb_config["user"] = os.environ.get("MONGODB_USER")
+            if os.environ.get("MONGODB_PASSWORD"):
+                mongodb_config["password"] = os.environ.get("MONGODB_PASSWORD")
+            if os.environ.get("MONGODB_HOST"):
+                mongodb_config["host"] = os.environ.get("MONGODB_HOST")
+            if os.environ.get("MONGODB_PORT"):
+                try:
+                    mongodb_config["port"] = int(os.environ.get("MONGODB_PORT"))
+                except ValueError:
+                    pass
+
+            print_success(
+                f"MongoDB config loaded: {mongodb_config['host']}:{mongodb_config['port']}/"
+                f"{mongodb_config['db_name']}"
+            )
+        else:
+            print_info("No .env file found, using default MongoDB configuration")
+
+    except ImportError:
+        print_warning("python-dotenv not installed, using default MongoDB configuration")
+    except Exception as e:
+        print_warning(f"Could not load .env file: {e}, using default MongoDB configuration")
+
+    return mongodb_config
+
+
+def drop_database(
+    host: str = "localhost",
+    port: int = 27017,
+    user: str = "admin",
+    password: str = "mongopass123",
+    db_name: str = "text_to_mongo_db",
+) -> bool:
+    """Drop the entire MongoDB database to start fresh.
+
+    Args:
+        host: MongoDB host
+        port: MongoDB port
+        user: MongoDB username
+        password: MongoDB password
+        db_name: Database name to drop
+
+    Returns:
+        True if database was dropped or doesn't exist, False on error
+    """
+    print_header("DROPPING EXISTING DATABASE")
+    print_warning(f"Dropping existing database: {db_name}")
+    print_info("Starting fresh database...\n")
+
+    try:
+        from pymongo import MongoClient
+
+        connection_string = f"mongodb://{user}:{password}@{host}:{port}/{db_name}?authSource=admin"
+        client = MongoClient(connection_string, serverSelectionTimeoutMS=10000)
+
+        # Test connection
+        try:
+            client.admin.command("ping")
+        except Exception as e:
+            print_error(f"Cannot connect to MongoDB: {e}")
+            print_info("Make sure MongoDB is running and accessible")
+            return False
+
+        # Check if database exists and drop it
+        db_list = client.list_database_names()
+        if db_name in db_list:
+            print_info(f"Dropping database: {db_name}")
+            client.drop_database(db_name)
+            print_success(f"Database '{db_name}' dropped successfully")
+        else:
+            print_info(f"Database '{db_name}' does not exist, creating fresh")
+
+        client.close()
+        return True
+
+    except ImportError:
+        print_error("[ERROR] pymongo not installed. Run: pip install pymongo")
+        return False
+    except Exception as e:
+        print_error(f"[ERROR] Failed to drop database: {e}")
+        return False
+
+
 def print_connection_details(
     host: str = "localhost",
     port: int = 27017,
@@ -649,6 +789,10 @@ Examples:
 
     print_header("COMPLETE HEALTHCARE DATA PIPELINE")
 
+    # Load MongoDB configuration from .env file
+    mongodb_config = load_mongodb_config()
+    print()
+
     # Check for Gemini API key from environment if not provided
     if not args.no_gemini and not args.gemini_key:
         args.gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -664,9 +808,22 @@ Examples:
             sys.exit(1)
 
         if not args.skip_verify:
-            verify_data(check_clean=True)
+            verify_data(
+                mongodb_config["host"],
+                mongodb_config["port"],
+                mongodb_config["user"],
+                mongodb_config["password"],
+                mongodb_config["db_name"],
+                check_clean=True,
+            )
 
-        print_connection_details()
+        print_connection_details(
+            mongodb_config["host"],
+            mongodb_config["port"],
+            mongodb_config["user"],
+            mongodb_config["password"],
+            mongodb_config["db_name"],
+        )
         print_success("Pipeline completed successfully!")
         return
 
@@ -689,6 +846,18 @@ Examples:
         print()
     else:
         print_info("Skipping infrastructure startup\n")
+
+    # Drop existing database to start fresh
+    if not drop_database(
+        mongodb_config["host"],
+        mongodb_config["port"],
+        mongodb_config["user"],
+        mongodb_config["password"],
+        mongodb_config["db_name"],
+    ):
+        print_error("Failed to drop existing database")
+        sys.exit(1)
+    print()
 
     # Generate Synthea data
     if not args.skip_synthea:
@@ -720,11 +889,24 @@ Examples:
 
     # Verify data
     if not args.skip_verify:
-        verify_data(check_clean=not args.skip_transform)
+        verify_data(
+            mongodb_config["host"],
+            mongodb_config["port"],
+            mongodb_config["user"],
+            mongodb_config["password"],
+            mongodb_config["db_name"],
+            check_clean=not args.skip_transform,
+        )
         print()
 
     # Print connection details
-    print_connection_details()
+    print_connection_details(
+        mongodb_config["host"],
+        mongodb_config["port"],
+        mongodb_config["user"],
+        mongodb_config["password"],
+        mongodb_config["db_name"],
+    )
 
     print_success("Pipeline completed successfully!")
     print_info("Your healthcare data is ready for analysis\n")
