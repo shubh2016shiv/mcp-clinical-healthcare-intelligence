@@ -81,3 +81,12 @@ dist/
 evaluation/reports/*.json
 
 evaluation/reports/*.html
+
+# Obsolete files and directories
+*_OBSELETE*
+*_OBSELETE/
+*_DELETE*
+*_DELETE/
+
+# Generated data
+synthea_output/
