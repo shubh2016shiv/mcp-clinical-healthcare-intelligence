@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Any
 
 import google.generativeai as genai
+from jsonpath_ng import parse as parse_jsonpath
 from pymongo import MongoClient, UpdateOne
 from pymongo.errors import BulkWriteError
 from tqdm import tqdm
@@ -194,6 +195,33 @@ def is_medically_relevant(text: str) -> bool:
         return False
 
     return True
+
+
+def extract_jsonpath(doc: dict, jsonpath_expr: str, default: Any = None) -> Any:
+    """Extract value from document using JSONPath expression.
+
+    Args:
+        doc: Document dictionary to search
+        jsonpath_expr: JSONPath expression (e.g., "$.patient.reference")
+        default: Default value if path not found
+
+    Returns:
+        Extracted value or default
+    """
+    try:
+        jsonpath = parse_jsonpath(jsonpath_expr)
+        matches = jsonpath.find(doc)
+        if matches:
+            # Return first match value
+            value = matches[0].value
+            # Handle empty strings/None
+            if value == "" or value is None:
+                return default
+            return value
+        return default
+    except Exception as e:
+        logger.debug(f"JSONPath extraction error for '{jsonpath_expr}': {e}")
+        return default
 
 
 # ============================================================================
@@ -486,15 +514,14 @@ Description:"""
 
 
 def transform_allergy(doc: dict, gemini: GeminiEnricher | None = None) -> dict | None:
-    """Transform AllergyIntolerance to clean Allergy model."""
-    allergy_name = extract_text_from_coding(doc.get("code", {}))
+    """Transform AllergyIntolerance to clean Allergy model using JSONPath for efficient extraction."""
+    code_obj = extract_jsonpath(doc, "$.code", {})
+    allergy_name = extract_text_from_coding(code_obj)
 
     if not allergy_name or not is_medically_relevant(allergy_name):
         return None
 
-    categories = doc.get("category", [])
-    category = categories[0] if categories else "unknown"
-
+    category = extract_jsonpath(doc, "$.category[0]", "unknown")
     category_map = {
         "food": "food",
         "medication": "medication",
@@ -503,24 +530,18 @@ def transform_allergy(doc: dict, gemini: GeminiEnricher | None = None) -> dict |
     }
     category = category_map.get(category, "environment")
 
-    criticality = doc.get("criticality", "low")
+    criticality = extract_jsonpath(doc, "$.criticality", "low")
     severity_map = {"low": "low", "high": "high", "unable-to-assess": "moderate"}
     severity = severity_map.get(criticality, "moderate")
 
-    status_obj = doc.get("clinicalStatus", {})
-    status_code = "active"
-    if isinstance(status_obj, dict):
-        coding = status_obj.get("coding", [])
-        if coding and isinstance(coding, list):
-            status_code = coding[0].get("code", "active")
-
+    status_code = extract_jsonpath(doc, "$.clinicalStatus.coding[0].code", "active")
     status_map = {"active": "active", "inactive": "inactive", "resolved": "resolved"}
     status = status_map.get(status_code, "active")
 
-    recorded_date = doc.get("recordedDate", "")
+    recorded_date = extract_jsonpath(doc, "$.recordedDate", "")
 
-    patient_ref = doc.get("patient", {})
-    patient_id = extract_reference_id(patient_ref.get("reference", ""))
+    patient_ref = extract_jsonpath(doc, "$.patient.reference", "")
+    patient_id = extract_reference_id(patient_ref)
 
     return {
         "allergy_name": allergy_name,
@@ -529,24 +550,19 @@ def transform_allergy(doc: dict, gemini: GeminiEnricher | None = None) -> dict |
         "status": status,
         "recorded_date": recorded_date,
         "patient_id": patient_id,
-        "source_fhir_id": doc.get("fhir_id", ""),
+        "source_fhir_id": extract_jsonpath(doc, "$.fhir_id", ""),
     }
 
 
 def transform_condition(doc: dict, gemini: GeminiEnricher | None = None) -> dict | None:
-    """Transform Condition to clean Condition model."""
-    condition_name = extract_text_from_coding(doc.get("code", {}))
+    """Transform Condition to clean Condition model using JSONPath for efficient extraction."""
+    code_obj = extract_jsonpath(doc, "$.code", {})
+    condition_name = extract_text_from_coding(code_obj)
 
     if not condition_name or not is_medically_relevant(condition_name):
         return None
 
-    status_obj = doc.get("clinicalStatus", {})
-    status_code = "active"
-    if isinstance(status_obj, dict):
-        coding = status_obj.get("coding", [])
-        if coding and isinstance(coding, list):
-            status_code = coding[0].get("code", "active")
-
+    status_code = extract_jsonpath(doc, "$.clinicalStatus.coding[0].code", "active")
     status_map = {
         "active": "active",
         "inactive": "inactive",
@@ -557,18 +573,13 @@ def transform_condition(doc: dict, gemini: GeminiEnricher | None = None) -> dict
     }
     status = status_map.get(status_code, "active")
 
-    verif_obj = doc.get("verificationStatus", {})
-    verif_code = "confirmed"
-    if isinstance(verif_obj, dict):
-        coding = verif_obj.get("coding", [])
-        if coding and isinstance(coding, list):
-            verif_code = coding[0].get("code", "confirmed")
+    verif_code = extract_jsonpath(doc, "$.verificationStatus.coding[0].code", "confirmed")
 
-    onset_date = doc.get("onsetDateTime", "")
-    recorded_date = doc.get("recordedDate", onset_date)
+    onset_date = extract_jsonpath(doc, "$.onsetDateTime", "")
+    recorded_date = extract_jsonpath(doc, "$.recordedDate", onset_date)
 
-    subject_ref = doc.get("subject", {})
-    patient_id = extract_reference_id(subject_ref.get("reference", ""))
+    patient_ref = extract_jsonpath(doc, "$.subject.reference", "")
+    patient_id = extract_reference_id(patient_ref)
 
     description = None
     if gemini and len(condition_name) < 100:
@@ -581,7 +592,7 @@ def transform_condition(doc: dict, gemini: GeminiEnricher | None = None) -> dict
         "recorded_date": recorded_date,
         "verification_status": verif_code,
         "patient_id": patient_id,
-        "source_fhir_id": doc.get("fhir_id", ""),
+        "source_fhir_id": extract_jsonpath(doc, "$.fhir_id", ""),
     }
 
     if description:
@@ -591,27 +602,24 @@ def transform_condition(doc: dict, gemini: GeminiEnricher | None = None) -> dict
 
 
 def transform_observation(doc: dict, gemini: GeminiEnricher | None = None) -> dict | None:
-    """Transform Observation to clean LabResult or VitalSign model."""
-    test_name = extract_text_from_coding(doc.get("code", {}))
+    """Transform Observation to clean LabResult or VitalSign model using JSONPath for efficient extraction."""
+    code_obj = extract_jsonpath(doc, "$.code", {})
+    test_name = extract_text_from_coding(code_obj)
 
     if not test_name or not is_medically_relevant(test_name):
         return None
 
-    value_qty = doc.get("valueQuantity", {})
-    if not isinstance(value_qty, dict):
-        return None
-
-    value = value_qty.get("value")
-    unit = value_qty.get("unit", "")
+    value = extract_jsonpath(doc, "$.valueQuantity.value", None)
+    unit = extract_jsonpath(doc, "$.valueQuantity.unit", "")
 
     if value is None:
         return None
 
-    status = doc.get("status", "final")
-    test_date = doc.get("effectiveDateTime", doc.get("issued", ""))
+    status = extract_jsonpath(doc, "$.status", "final")
+    test_date = extract_jsonpath(doc, "$.effectiveDateTime", extract_jsonpath(doc, "$.issued", ""))
 
-    subject_ref = doc.get("subject", {})
-    patient_id = extract_reference_id(subject_ref.get("reference", ""))
+    patient_ref = extract_jsonpath(doc, "$.subject.reference", "")
+    patient_id = extract_reference_id(patient_ref)
 
     vital_keywords = [
         "blood pressure",
@@ -633,7 +641,7 @@ def transform_observation(doc: dict, gemini: GeminiEnricher | None = None) -> di
         "status": status,
         "test_date": test_date,
         "patient_id": patient_id,
-        "source_fhir_id": doc.get("fhir_id", ""),
+        "source_fhir_id": extract_jsonpath(doc, "$.fhir_id", ""),
         "observation_type": "vital_sign" if is_vital else "lab_result",
     }
 
@@ -641,21 +649,18 @@ def transform_observation(doc: dict, gemini: GeminiEnricher | None = None) -> di
 
 
 def transform_medication_request(doc: dict, gemini: GeminiEnricher | None = None) -> dict | None:
-    """Transform MedicationRequest to clean Medication model."""
-    medication_name = ""
-
-    med_code = doc.get("medicationCodeableConcept", {})
-    if isinstance(med_code, dict):
-        medication_name = extract_text_from_coding(med_code)
+    """Transform MedicationRequest to clean Medication model using JSONPath for efficient extraction."""
+    med_code = extract_jsonpath(doc, "$.medicationCodeableConcept", {})
+    medication_name = extract_text_from_coding(med_code) if med_code else ""
 
     if not medication_name:
-        med_ref = doc.get("medicationReference", {})
+        med_ref = extract_jsonpath(doc, "$.medicationReference", {})
         medication_name = extract_display_from_reference(med_ref)
 
     if not medication_name or not is_medically_relevant(medication_name):
         return None
 
-    status = doc.get("status", "active")
+    status_code = extract_jsonpath(doc, "$.status", "active")
     status_map = {
         "active": "active",
         "completed": "completed",
@@ -664,15 +669,15 @@ def transform_medication_request(doc: dict, gemini: GeminiEnricher | None = None
         "cancelled": "stopped",
         "entered-in-error": "stopped",
     }
-    status = status_map.get(status, "active")
+    status = status_map.get(status_code, "active")
 
-    prescribed_date = doc.get("authoredOn", "")
+    prescribed_date = extract_jsonpath(doc, "$.authoredOn", "")
 
-    requester = doc.get("requester", {})
-    prescriber = extract_display_from_reference(requester)
+    requester_obj = extract_jsonpath(doc, "$.requester", {})
+    prescriber = extract_display_from_reference(requester_obj)
 
-    subject_ref = doc.get("subject", {})
-    patient_id = extract_reference_id(subject_ref.get("reference", ""))
+    patient_ref = extract_jsonpath(doc, "$.subject.reference", "")
+    patient_id = extract_reference_id(patient_ref)
 
     return {
         "medication_name": medication_name,
@@ -680,27 +685,27 @@ def transform_medication_request(doc: dict, gemini: GeminiEnricher | None = None
         "prescribed_date": prescribed_date,
         "prescriber": prescriber if prescriber else None,
         "patient_id": patient_id,
-        "source_fhir_id": doc.get("fhir_id", ""),
+        "source_fhir_id": extract_jsonpath(doc, "$.fhir_id", ""),
     }
 
 
 def transform_immunization(doc: dict, gemini: GeminiEnricher | None = None) -> dict | None:
-    """Transform Immunization to clean Immunization model."""
-    vaccine_code = doc.get("vaccineCode", {})
+    """Transform Immunization to clean Immunization model using JSONPath for efficient extraction."""
+    vaccine_code = extract_jsonpath(doc, "$.vaccineCode", {})
     vaccine_name = extract_text_from_coding(vaccine_code)
 
     if not vaccine_name or not is_medically_relevant(vaccine_name):
         return None
 
-    admin_date = doc.get("occurrenceDateTime", "")
+    admin_date = extract_jsonpath(doc, "$.occurrenceDateTime", "")
 
-    location_ref = doc.get("location", {})
-    location = extract_display_from_reference(location_ref)
+    location_obj = extract_jsonpath(doc, "$.location", {})
+    location = extract_display_from_reference(location_obj)
 
-    status = doc.get("status", "completed")
+    status = extract_jsonpath(doc, "$.status", "completed")
 
-    patient_ref = doc.get("patient", {})
-    patient_id = extract_reference_id(patient_ref.get("reference", ""))
+    patient_ref = extract_jsonpath(doc, "$.patient.reference", "")
+    patient_id = extract_reference_id(patient_ref)
 
     return {
         "vaccine_name": vaccine_name,
@@ -708,29 +713,30 @@ def transform_immunization(doc: dict, gemini: GeminiEnricher | None = None) -> d
         "location": location if location else None,
         "status": status,
         "patient_id": patient_id,
-        "source_fhir_id": doc.get("fhir_id", ""),
+        "source_fhir_id": extract_jsonpath(doc, "$.fhir_id", ""),
     }
 
 
 def transform_procedure(doc: dict, gemini: GeminiEnricher | None = None) -> dict | None:
-    """Transform Procedure to clean Procedure model."""
-    code = doc.get("code", {})
+    """Transform Procedure to clean Procedure model using JSONPath for efficient extraction."""
+    code = extract_jsonpath(doc, "$.code", {})
     procedure_name = extract_text_from_coding(code)
 
     if not procedure_name or not is_medically_relevant(procedure_name):
         return None
 
-    status = doc.get("status", "completed")
+    status = extract_jsonpath(doc, "$.status", "completed")
 
-    performed_period = doc.get("performedPeriod", {})
-    performed_date = performed_period.get("start", doc.get("performedDateTime", ""))
-    end_date = performed_period.get("end")
+    performed_date = extract_jsonpath(
+        doc, "$.performedPeriod.start", extract_jsonpath(doc, "$.performedDateTime", "")
+    )
+    end_date = extract_jsonpath(doc, "$.performedPeriod.end", None)
 
-    location_ref = doc.get("location", {})
-    location = extract_display_from_reference(location_ref)
+    location_obj = extract_jsonpath(doc, "$.location", {})
+    location = extract_display_from_reference(location_obj)
 
-    subject_ref = doc.get("subject", {})
-    patient_id = extract_reference_id(subject_ref.get("reference", ""))
+    patient_ref = extract_jsonpath(doc, "$.subject.reference", "")
+    patient_id = extract_reference_id(patient_ref)
 
     return {
         "procedure_name": procedure_name,
@@ -739,22 +745,16 @@ def transform_procedure(doc: dict, gemini: GeminiEnricher | None = None) -> dict
         "end_date": end_date if end_date else None,
         "location": location if location else None,
         "patient_id": patient_id,
-        "source_fhir_id": doc.get("fhir_id", ""),
+        "source_fhir_id": extract_jsonpath(doc, "$.fhir_id", ""),
     }
 
 
 def transform_encounter(doc: dict, gemini: GeminiEnricher | None = None) -> dict | None:
-    """Transform Encounter to clean Encounter model."""
-    type_array = doc.get("type", [])
-    visit_reason = ""
-    if type_array and isinstance(type_array, list):
-        visit_reason = extract_text_from_coding(type_array[0])
+    """Transform Encounter to clean Encounter model using JSONPath for efficient extraction."""
+    type_obj = extract_jsonpath(doc, "$.type[0]", {})
+    visit_reason = extract_text_from_coding(type_obj) if type_obj else ""
 
-    class_obj = doc.get("class", {})
-    encounter_type = (
-        class_obj.get("code", "ambulatory") if isinstance(class_obj, dict) else "ambulatory"
-    )
-
+    encounter_type_code = extract_jsonpath(doc, "$.class.code", "ambulatory")
     type_map = {
         "AMB": "ambulatory",
         "EMER": "emergency",
@@ -763,28 +763,21 @@ def transform_encounter(doc: dict, gemini: GeminiEnricher | None = None) -> dict
         "NONAC": "ambulatory",
         "VR": "virtual",
     }
-    encounter_type = type_map.get(encounter_type, "ambulatory")
+    encounter_type = type_map.get(encounter_type_code, "ambulatory")
 
-    period = doc.get("period", {})
-    start_date = period.get("start", "")
-    end_date = period.get("end")
+    start_date = extract_jsonpath(doc, "$.period.start", "")
+    end_date = extract_jsonpath(doc, "$.period.end", None)
 
-    location_array = doc.get("location", [])
-    location = ""
-    if location_array and isinstance(location_array, list):
-        location_obj = location_array[0].get("location", {})
-        location = extract_display_from_reference(location_obj)
+    location_obj = extract_jsonpath(doc, "$.location[0].location", {})
+    location = extract_display_from_reference(location_obj) if location_obj else ""
 
-    participant_array = doc.get("participant", [])
-    provider = ""
-    if participant_array and isinstance(participant_array, list):
-        individual = participant_array[0].get("individual", {})
-        provider = extract_display_from_reference(individual)
+    individual_obj = extract_jsonpath(doc, "$.participant[0].individual", {})
+    provider = extract_display_from_reference(individual_obj) if individual_obj else ""
 
-    status = doc.get("status", "finished")
+    status = extract_jsonpath(doc, "$.status", "finished")
 
-    subject_ref = doc.get("subject", {})
-    patient_id = extract_reference_id(subject_ref.get("reference", ""))
+    patient_ref = extract_jsonpath(doc, "$.subject.reference", "")
+    patient_id = extract_reference_id(patient_ref)
 
     return {
         "encounter_type": encounter_type,
@@ -795,7 +788,7 @@ def transform_encounter(doc: dict, gemini: GeminiEnricher | None = None) -> dict
         "provider": provider if provider else None,
         "status": status,
         "patient_id": patient_id,
-        "source_fhir_id": doc.get("fhir_id", ""),
+        "source_fhir_id": extract_jsonpath(doc, "$.fhir_id", ""),
     }
 
 
@@ -975,8 +968,8 @@ def transform_patient(doc: dict, gemini: GeminiEnricher | None = None) -> dict |
 
 
 def transform_diagnostic_report(doc: dict, gemini: GeminiEnricher | None = None) -> dict | None:
-    """Transform DiagnosticReport - extract clinical summary with Gemini."""
-    presented_form = doc.get("presentedForm", [])
+    """Transform DiagnosticReport - extract clinical summary with Gemini using JSONPath for efficient extraction."""
+    presented_form = extract_jsonpath(doc, "$.presentedForm", [])
 
     if not presented_form or not isinstance(presented_form, list):
         return None
@@ -1003,21 +996,275 @@ def transform_diagnostic_report(doc: dict, gemini: GeminiEnricher | None = None)
     if not clinical_summary or len(clinical_summary) < 20:
         return None
 
-    code = doc.get("code", {})
+    code = extract_jsonpath(doc, "$.code", {})
     report_type = extract_text_from_coding(code)
 
-    report_date = doc.get("effectiveDateTime", doc.get("issued", ""))
+    report_date = extract_jsonpath(
+        doc, "$.effectiveDateTime", extract_jsonpath(doc, "$.issued", "")
+    )
 
-    subject_ref = doc.get("subject", {})
-    patient_id = extract_reference_id(subject_ref.get("reference", ""))
+    patient_ref = extract_jsonpath(doc, "$.subject.reference", "")
+    patient_id = extract_reference_id(patient_ref)
 
     return {
         "report_type": report_type if report_type else "Clinical Report",
         "clinical_summary": clinical_summary,
         "report_date": report_date,
         "patient_id": patient_id,
+        "source_fhir_id": extract_jsonpath(doc, "$.fhir_id", ""),
+    }
+
+
+def transform_claim(doc: dict, gemini: GeminiEnricher | None = None) -> dict | None:
+    """Transform Claim to clean Claim model using JSONPath for efficient extraction.
+
+    Args:
+        doc: Raw FHIR Claim document
+        gemini: Optional Gemini enricher (not used for claims currently)
+
+    Returns:
+        Transformed claim document or None if invalid
+    """
+    # Extract patient information
+    patient_ref = extract_jsonpath(doc, "$.patient.reference", "")
+    patient_id = extract_reference_id(patient_ref)
+    patient_display_name = extract_jsonpath(doc, "$.patient.display", "")
+
+    if not patient_id:
+        return None
+
+    # Extract billable period
+    billable_period_start = extract_jsonpath(doc, "$.billablePeriod.start", "")
+    billable_period_end = extract_jsonpath(doc, "$.billablePeriod.end", "")
+
+    # Extract dates and status
+    created_date = extract_jsonpath(doc, "$.created", "")
+    status = extract_jsonpath(doc, "$.status", "")
+
+    # Extract type (display only, not code)
+    type_display = extract_jsonpath(doc, "$.type.coding[0].display", "")
+    if not type_display:
+        # Fallback to text if available
+        type_display = extract_jsonpath(doc, "$.type.text", "")
+
+    # Extract total amount
+    total_value = extract_jsonpath(doc, "$.total.value", None)
+    total_currency = extract_jsonpath(doc, "$.total.currency", "USD")
+
+    # Extract facility, provider, insurance
+    facility_display = extract_jsonpath(doc, "$.facility.display", "")
+    provider_display = extract_jsonpath(doc, "$.provider.display", "")
+    insurance_display = extract_jsonpath(doc, "$.insurance[0].coverage.display", "")
+
+    # Extract diagnosis references (IDs only)
+    diagnosis_refs = []
+    diagnosis_array = extract_jsonpath(doc, "$.diagnosis", [])
+    if isinstance(diagnosis_array, list):
+        for diag in diagnosis_array:
+            if isinstance(diag, dict):
+                diag_ref = extract_jsonpath(diag, "$.diagnosisReference.reference", "")
+                if diag_ref:
+                    diag_id = extract_reference_id(diag_ref)
+                    if diag_id:
+                        diagnosis_refs.append(diag_id)
+
+    # Extract items
+    items = []
+    item_array = extract_jsonpath(doc, "$.item", [])
+    if isinstance(item_array, list):
+        for item in item_array:
+            if not isinstance(item, dict):
+                continue
+
+            # Extract product or service information
+            product_service_display = extract_jsonpath(
+                item, "$.productOrService.coding[0].display", ""
+            )
+            product_service_text = extract_jsonpath(item, "$.productOrService.text", "")
+
+            # Use display if available, otherwise text
+            service_name = product_service_display or product_service_text
+
+            if not service_name or not is_medically_relevant(service_name):
+                continue
+
+            # Extract encounter reference (ID only)
+            encounter_ref = extract_jsonpath(item, "$.encounter[0].reference", "")
+            encounter_id = extract_reference_id(encounter_ref) if encounter_ref else None
+
+            items.append(
+                {
+                    "product_or_service_display": service_name,
+                    "product_or_service_text": product_service_text
+                    if product_service_text
+                    else None,
+                    "encounter_reference": encounter_id,
+                }
+            )
+
+    # Build result document
+    result = {
+        "patient_id": patient_id,
+        "patient_display_name": patient_display_name if patient_display_name else None,
+        "billable_period_start": billable_period_start,
+        "billable_period_end": billable_period_end if billable_period_end else None,
+        "created_date": created_date,
+        "status": status,
+        "type": type_display if type_display else None,
+        "total_value": float(total_value) if total_value is not None else None,
+        "total_currency": total_currency,
+        "facility_display": facility_display if facility_display else None,
+        "provider_display": provider_display if provider_display else None,
+        "insurance_display": insurance_display if insurance_display else None,
+        "diagnosis_references": diagnosis_refs if diagnosis_refs else None,
+        "items": items if items else None,
         "source_fhir_id": doc.get("fhir_id", ""),
     }
+
+    return result
+
+
+def transform_explanation_of_benefit(
+    doc: dict, gemini: GeminiEnricher | None = None
+) -> dict | None:
+    """Transform ExplanationOfBenefit to clean EOB model using JSONPath for efficient extraction.
+
+    Args:
+        doc: Raw FHIR ExplanationOfBenefit document
+        gemini: Optional Gemini enricher (not used for EOB currently)
+
+    Returns:
+        Transformed EOB document or None if invalid
+    """
+    # Extract patient information
+    patient_ref = extract_jsonpath(doc, "$.patient.reference", "")
+    patient_id = extract_reference_id(patient_ref)
+
+    if not patient_id:
+        return None
+
+    # Extract billable period
+    billable_period_start = extract_jsonpath(doc, "$.billablePeriod.start", "")
+    billable_period_end = extract_jsonpath(doc, "$.billablePeriod.end", "")
+
+    # Extract dates, status, outcome
+    created_date = extract_jsonpath(doc, "$.created", "")
+    status = extract_jsonpath(doc, "$.status", "")
+    outcome = extract_jsonpath(doc, "$.outcome", "")
+
+    # Extract type (display only, not code)
+    type_display = extract_jsonpath(doc, "$.type.coding[0].display", "")
+    if not type_display:
+        type_display = extract_jsonpath(doc, "$.type.text", "")
+
+    # Extract total submitted amount
+    total_submitted_value = extract_jsonpath(doc, "$.total[0].amount.value", None)
+    total_submitted_currency = extract_jsonpath(doc, "$.total[0].amount.currency", "USD")
+
+    # Extract facility, provider, insurer
+    facility_display = extract_jsonpath(doc, "$.facility.display", "")
+    provider_ref = extract_jsonpath(doc, "$.provider.reference", "")
+    provider_reference = extract_reference_id(provider_ref) if provider_ref else None
+    insurer_display = extract_jsonpath(doc, "$.insurer.display", "")
+
+    # Extract claim reference (ID only)
+    claim_ref = extract_jsonpath(doc, "$.claim.reference", "")
+    claim_reference = extract_reference_id(claim_ref) if claim_ref else None
+
+    # Extract items with detailed information
+    items = []
+    item_array = extract_jsonpath(doc, "$.item", [])
+    if isinstance(item_array, list):
+        for item in item_array:
+            if not isinstance(item, dict):
+                continue
+
+            # Extract category
+            category_display = extract_jsonpath(item, "$.category.coding[0].display", "")
+
+            # Extract product or service
+            product_service_display = extract_jsonpath(
+                item, "$.productOrService.coding[0].display", ""
+            )
+            product_service_text = extract_jsonpath(item, "$.productOrService.text", "")
+            service_name = product_service_display or product_service_text
+
+            if not service_name or not is_medically_relevant(service_name):
+                continue
+
+            # Extract serviced period
+            serviced_period_start = extract_jsonpath(item, "$.servicedPeriod.start", "")
+            serviced_period_end = extract_jsonpath(item, "$.servicedPeriod.end", "")
+
+            # Extract location
+            location_display = extract_jsonpath(
+                item, "$.locationCodeableConcept.coding[0].display", ""
+            )
+
+            # Extract net amount
+            net_value = extract_jsonpath(item, "$.net.value", None)
+            net_currency = extract_jsonpath(item, "$.net.currency", "USD")
+
+            # Extract adjudications (simplified - only category display and amount)
+            adjudications = []
+            adjudication_array = extract_jsonpath(item, "$.adjudication", [])
+            if isinstance(adjudication_array, list):
+                for adj in adjudication_array:
+                    if not isinstance(adj, dict):
+                        continue
+                    adj_category_display = extract_jsonpath(adj, "$.category.coding[0].display", "")
+                    adj_amount_value = extract_jsonpath(adj, "$.amount.value", None)
+                    adj_amount_currency = extract_jsonpath(adj, "$.amount.currency", "USD")
+
+                    if adj_category_display and adj_amount_value is not None:
+                        adjudications.append(
+                            {
+                                "category_display": adj_category_display,
+                                "amount_value": float(adj_amount_value),
+                                "amount_currency": adj_amount_currency,
+                            }
+                        )
+
+            items.append(
+                {
+                    "category_display": category_display if category_display else None,
+                    "product_or_service_display": service_name,
+                    "product_or_service_text": product_service_text
+                    if product_service_text
+                    else None,
+                    "serviced_period_start": serviced_period_start
+                    if serviced_period_start
+                    else None,
+                    "serviced_period_end": serviced_period_end if serviced_period_end else None,
+                    "location_display": location_display if location_display else None,
+                    "net_value": float(net_value) if net_value is not None else None,
+                    "net_currency": net_currency,
+                    "adjudications": adjudications if adjudications else None,
+                }
+            )
+
+    # Build result document
+    result = {
+        "patient_id": patient_id,
+        "billable_period_start": billable_period_start,
+        "billable_period_end": billable_period_end if billable_period_end else None,
+        "created_date": created_date,
+        "status": status,
+        "outcome": outcome if outcome else None,
+        "type": type_display if type_display else None,
+        "total_submitted_value": float(total_submitted_value)
+        if total_submitted_value is not None
+        else None,
+        "total_submitted_currency": total_submitted_currency,
+        "facility_display": facility_display if facility_display else None,
+        "provider_reference": provider_reference,
+        "insurer_display": insurer_display if insurer_display else None,
+        "claim_reference": claim_reference,
+        "items": items if items else None,
+        "source_fhir_id": doc.get("fhir_id", ""),
+    }
+
+    return result
 
 
 # ============================================================================
@@ -1374,6 +1621,8 @@ class FHIRTransformationPipeline:
                 "careplans": "transform_care_plan",
                 "patients": "transform_patient",
                 "diagnosticreports": "transform_diagnostic_report",
+                "claims": "transform_claim",
+                "explanationofbenefits": "transform_explanation_of_benefit",
             }
 
             self._transformations = {}
@@ -1606,6 +1855,18 @@ class FHIRTransformationPipeline:
             "diagnosticreports": [  # Fixed: use final name from mapping (no underscore)
                 ("patient_id", {}),
                 ("report_type", {}),
+            ],
+            "claims": [
+                ("patient_id", {}),
+                ("created_date", {}),
+                ("status", {}),
+                ("type", {}),
+            ],
+            "explanationofbenefits": [
+                ("patient_id", {}),
+                ("created_date", {}),
+                ("status", {}),
+                ("type", {}),
             ],
         }
 
