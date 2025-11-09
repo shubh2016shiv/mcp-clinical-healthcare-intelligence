@@ -1031,7 +1031,7 @@ class FHIRTransformationPipeline:
     def __init__(
         self,
         mongo_client: MongoClient,
-        db_name: str = "text_to_mongo_db",
+        db_name: str = "fhir_db",
         gemini_api_key: str | None = None,
         use_gemini: bool = True,
     ):
@@ -1669,9 +1669,7 @@ Examples:
     parser.add_argument("--port", type=int, default=27017, help="MongoDB port (default: 27017)")
     parser.add_argument("--user", default="admin", help="MongoDB username (default: admin)")
     parser.add_argument("--password", default="mongopass123", help="MongoDB password")
-    parser.add_argument(
-        "--db-name", default="text_to_mongo_db", help="Database name (default: text_to_mongo_db)"
-    )
+    parser.add_argument("--db-name", default="fhir_db", help="Database name (default: fhir_db)")
     parser.add_argument("--gemini-key", help="Google AI API key for Gemini (optional)")
     parser.add_argument("--no-gemini", action="store_true", help="Disable Gemini enrichment")
     parser.add_argument(

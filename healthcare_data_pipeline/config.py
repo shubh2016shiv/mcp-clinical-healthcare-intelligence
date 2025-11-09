@@ -129,11 +129,12 @@ class ApplicationConfig(BaseModel):
         return value
 
     def get_database_name(self) -> str:
-        """Get database name with environment suffix for non-production."""
-        base_name = self.mongodb.db_name
-        if self.environment != Environment.PRODUCTION:
-            return f"{base_name}_{self.environment.value}"
-        return base_name
+        """Get database name - centralized single database for all environments.
+
+        Returns the configured database name without environment-based suffixes.
+        All environments use the same database name as configured in .env.
+        """
+        return self.mongodb.db_name
 
 
 class ConfigManager:
@@ -246,7 +247,7 @@ class ConfigManager:
             port=int(os.environ.get("MONGODB_PORT", "27017")),
             user=os.environ.get("MONGODB_USER", "admin"),
             password=os.environ.get("MONGODB_PASSWORD", "mongopass123"),
-            db_name=os.environ.get("MONGODB_DATABASE", "text_to_mongo_db"),
+            db_name=os.environ.get("MONGODB_DATABASE", "fhir_db"),
             auth_source=os.environ.get("MONGODB_AUTH_SOURCE", "admin"),
             max_pool_size=int(os.environ.get("MONGODB_MAX_POOL_SIZE", "10")),
             min_pool_size=int(os.environ.get("MONGODB_MIN_POOL_SIZE", "2")),
@@ -473,7 +474,7 @@ MONGODB_HOST=localhost
 MONGODB_PORT=27017
 MONGODB_USER=admin
 MONGODB_PASSWORD=mongopass123
-MONGODB_DATABASE=text_to_mongo_db
+MONGODB_DATABASE=fhir_db
 MONGODB_AUTH_SOURCE=admin
 
 # MongoDB Connection Pool Settings

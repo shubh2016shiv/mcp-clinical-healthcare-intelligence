@@ -1830,10 +1830,10 @@ docker compose down -v
 - **Port**: 27017
 - **Username**: admin
 - **Password**: mongopass123
-- **Database**: text_to_mongo_db
+- **Database**: fhir_db (centralized single database for all environments)
 - **Connection String**: 
   ```
-  mongodb://admin:mongopass123@localhost:27017/text_to_mongo_db?authSource=admin
+  mongodb://admin:mongopass123@localhost:27017/fhir_db?authSource=admin
   ```
 
 ### Redis

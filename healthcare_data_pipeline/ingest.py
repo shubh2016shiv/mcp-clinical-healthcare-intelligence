@@ -102,7 +102,7 @@ def get_mongodb_client(
     port: int = 27017,
     user: str = "admin",
     password: str = "mongopass123",
-    db_name: str = "text_to_mongo_db",
+    db_name: str = "fhir_db",
     timeout_ms: int = 30000,
 ) -> MongoClient:
     """
@@ -379,7 +379,7 @@ def process_fhir_file_worker(
 
 def ingest_fhir_data(
     data_path: str,
-    db_name: str = "text_to_mongo_db",
+    db_name: str = "fhir_db",
     host: str = "localhost",
     port: int = 27017,
     user: str = "admin",
@@ -595,7 +595,7 @@ def ingest_fhir_data(
 
 
 def ingest_drug_data(
-    db_name: str = "text_to_mongo_db",
+    db_name: str = "fhir_db",
     host: str = "localhost",
     port: int = 27017,
     user: str = "admin",
@@ -757,8 +757,8 @@ Examples:
     parser.add_argument("data_path", help="Path to directory containing FHIR JSON files")
     parser.add_argument(
         "--db-name",
-        default="text_to_mongo_db",
-        help="MongoDB database name (default: text_to_mongo_db)",
+        default="fhir_db",
+        help="MongoDB database name (default: fhir_db)",
     )
     parser.add_argument("--host", default="localhost", help="MongoDB host (default: localhost)")
     parser.add_argument("--port", type=int, default=27017, help="MongoDB port (default: 27017)")

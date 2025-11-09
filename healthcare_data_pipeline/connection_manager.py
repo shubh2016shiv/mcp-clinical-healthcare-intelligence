@@ -46,7 +46,7 @@ class ConnectionConfig(BaseModel):
     port: int = Field(default=27017, description="MongoDB port")
     user: str = Field(default="admin", description="MongoDB username")
     password: str = Field(default="mongopass123", description="MongoDB password")
-    db_name: str = Field(default="text_to_mongo_db", description="Default database name")
+    db_name: str = Field(default="fhir_db", description="Default database name")
     auth_source: str = Field(default="admin", description="Authentication database")
     max_pool_size: int = Field(default=10, description="Maximum connection pool size", ge=1)
     min_pool_size: int = Field(default=2, description="Minimum connection pool size", ge=1)

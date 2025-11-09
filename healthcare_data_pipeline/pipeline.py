@@ -364,7 +364,7 @@ def ingest_data(
         # Directly call ingest_fhir_data with all parameters
         stats = ingest_fhir_data(
             data_path=str(fhir_dir),
-            db_name=config.get_database_name(),
+            db_name=config.mongodb.db_name,
             host=config.mongodb.host,
             port=config.mongodb.port,
             user=config.mongodb.user,
@@ -490,7 +490,7 @@ def verify_data(
     port: int = 27017,
     user: str = "admin",
     password: str = "mongopass123",
-    db_name: str = "text_to_mongo_db",
+    db_name: str = "fhir_db",
     check_clean: bool = True,
 ) -> bool:
     """Verify data was ingested and transformed correctly."""
@@ -564,75 +564,7 @@ def verify_data(
         print_error(f"[ERROR] Verification failed: {e}")
         return False
 
-    # Removed old load_mongodb_config function - using new config system
-    """Load MongoDB configuration from .env file or use defaults.
-
-    Returns:
-        Dictionary with MongoDB configuration (host, port, user, password, db_name)
-    """
-    # Default configuration
-    mongodb_config = {
-        "host": "localhost",
-        "port": 27017,
-        "user": "admin",
-        "password": "mongopass123",
-        "db_name": "text_to_mongo_db",
-    }
-
-    try:
-        from dotenv import load_dotenv
-
-        project_root = Path(__file__).parent.parent
-        env_path = project_root / ".env"
-
-        if env_path.exists():
-            load_dotenv(env_path)
-            print_info("Loading MongoDB configuration from .env file")
-
-            # Load MongoDB URI or individual components
-            mongodb_uri = os.environ.get("MONGODB_URI")
-            if mongodb_uri:
-                # Parse URI if provided
-                from urllib.parse import urlparse
-
-                parsed = urlparse(mongodb_uri)
-                mongodb_config["host"] = parsed.hostname or mongodb_config["host"]
-                mongodb_config["port"] = parsed.port or mongodb_config["port"]
-                if parsed.username:
-                    mongodb_config["user"] = parsed.username
-                if parsed.password:
-                    mongodb_config["password"] = parsed.password
-                if parsed.path and parsed.path.strip("/"):
-                    mongodb_config["db_name"] = parsed.path.strip("/")
-
-            # Override with individual env vars if present
-            if os.environ.get("MONGODB_DATABASE"):
-                mongodb_config["db_name"] = os.environ.get("MONGODB_DATABASE")
-            if os.environ.get("MONGODB_USER"):
-                mongodb_config["user"] = os.environ.get("MONGODB_USER")
-            if os.environ.get("MONGODB_PASSWORD"):
-                mongodb_config["password"] = os.environ.get("MONGODB_PASSWORD")
-            if os.environ.get("MONGODB_HOST"):
-                mongodb_config["host"] = os.environ.get("MONGODB_HOST")
-            if os.environ.get("MONGODB_PORT"):
-                try:
-                    mongodb_config["port"] = int(os.environ.get("MONGODB_PORT"))
-                except ValueError:
-                    pass
-
-            print_success(
-                f"MongoDB config loaded: {mongodb_config['host']}:{mongodb_config['port']}/"
-                f"{mongodb_config['db_name']}"
-            )
-        else:
-            print_info("No .env file found, using default MongoDB configuration")
-
-    except ImportError:
-        print_warning("python-dotenv not installed, using default MongoDB configuration")
-    except Exception as e:
-        print_warning(f"Could not load .env file: {e}, using default MongoDB configuration")
-
-    return mongodb_config
+    # Removed - now using centralized config system via config.py
 
 
 def drop_database(
@@ -640,7 +572,7 @@ def drop_database(
     port: int = 27017,
     user: str = "admin",
     password: str = "mongopass123",
-    db_name: str = "text_to_mongo_db",
+    db_name: str = "fhir_db",
 ) -> bool:
     """Drop the entire MongoDB database to start fresh.
 
@@ -697,7 +629,7 @@ def print_connection_details(
     port: int = 27017,
     user: str = "admin",
     password: str = "mongopass123",
-    db_name: str = "text_to_mongo_db",
+    db_name: str = "fhir_db",
 ) -> None:
     """Print connection details and sample queries."""
     print_header("CONNECTION DETAILS & NEXT STEPS")
@@ -876,7 +808,7 @@ Examples:
                 config.mongodb.port,
                 config.mongodb.user,
                 config.mongodb.password,
-                config.get_database_name(),
+                config.mongodb.db_name,
                 check_clean=True,
             )
 
@@ -885,7 +817,7 @@ Examples:
             config.mongodb.port,
             config.mongodb.user,
             config.mongodb.password,
-            config.get_database_name(),
+            config.mongodb.db_name,
         )
         print_success("Pipeline completed successfully!")
         return
@@ -916,7 +848,7 @@ Examples:
         config.mongodb.port,
         config.mongodb.user,
         config.mongodb.password,
-        config.get_database_name(),
+        config.mongodb.db_name,
     ):
         print_error("Failed to drop existing database")
         sys.exit(1)
@@ -963,7 +895,7 @@ Examples:
             config.mongodb.port,
             config.mongodb.user,
             config.mongodb.password,
-            config.get_database_name(),
+            config.mongodb.db_name,
             check_clean=not args.skip_transform,
         )
         print()
@@ -985,7 +917,7 @@ Examples:
         config.mongodb.port,
         config.mongodb.user,
         config.mongodb.password,
-        config.get_database_name(),
+        config.mongodb.db_name,
     )
 
     print_success("Pipeline completed successfully!")
