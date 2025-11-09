@@ -12,6 +12,7 @@ them into MongoDB with proper error handling and progress reporting.
 
 import json
 import logging
+import multiprocessing
 import sys
 import time
 from datetime import UTC, datetime
@@ -305,6 +306,77 @@ def create_indexes(db) -> None:
     print_success(f"Created {indexes_created} indexes")
 
 
+def process_fhir_file_worker(
+    file_path: str, connection_config: dict[str, Any], resource_collections: dict[str, str]
+) -> tuple[str, dict[str, int], str | None]:
+    """Worker function to process a single FHIR file.
+
+    Args:
+        file_path: Path to the FHIR file
+        connection_config: Database connection configuration
+        resource_collections: Resource type to collection mapping
+
+    Returns:
+        Tuple of (file_name, stats, error_message)
+    """
+    try:
+        # Create new database connection for this worker
+        client = get_mongodb_client(**connection_config)
+        db = client[connection_config["db_name"]]
+
+        file_path_obj = Path(file_path)
+        stats = {"total_resources": 0, "errors": 0}
+        stats.update({collection: 0 for collection in resource_collections.values()})
+
+        # Read and parse FHIR bundle
+        with open(file_path_obj, encoding="utf-8") as f:
+            bundle = json.load(f)
+
+        resources = extract_resources_from_bundle(bundle)
+
+        if not resources:
+            return file_path_obj.name, stats, f"No resources found in {file_path_obj.name}"
+
+        # Group resources by type
+        resources_by_type: dict[str, list[dict[str, Any]]] = {}
+        for resource in resources:
+            resource_type = resource.get("resourceType")
+            if resource_type in resource_collections:
+                if resource_type not in resources_by_type:
+                    resources_by_type[resource_type] = []
+                resources_by_type[resource_type].append(sanitize_resource(resource))
+                stats["total_resources"] += 1
+
+        # Bulk insert by resource type
+        for resource_type, resources_list in resources_by_type.items():
+            collection_name = resource_collections[resource_type]
+            collection = db[collection_name]
+
+            try:
+                # Create upsert operations based on FHIR ID
+                operations = [
+                    UpdateOne({"fhir_id": resource.get("fhir_id")}, {"$set": resource}, upsert=True)
+                    for resource in resources_list
+                ]
+
+                if operations:
+                    result = collection.bulk_write(operations, ordered=False)
+                    inserted = result.upserted_count + result.modified_count
+                    stats[collection_name] += inserted
+
+            except BulkWriteError as bwe:
+                stats[collection_name] += bwe.details.get("nInserted", 0)
+                stats["errors"] += 1
+            except Exception:
+                stats["errors"] += 1
+
+        client.close()
+        return file_path_obj.name, stats, None
+
+    except Exception as e:
+        return Path(file_path).name, {"total_resources": 0, "errors": 1}, str(e)
+
+
 def ingest_fhir_data(
     data_path: str,
     db_name: str = "text_to_mongo_db",
@@ -312,6 +384,8 @@ def ingest_fhir_data(
     port: int = 27017,
     user: str = "admin",
     password: str = "mongopass123",
+    enable_parallel: bool = True,
+    max_workers: int | None = None,
 ) -> dict[str, int]:
     """
     Main ingestion function that orchestrates the entire FHIR data loading process.
@@ -329,7 +403,7 @@ def ingest_fhir_data(
     """
     print_header("FHIR DATA INGESTION PIPELINE")
 
-    # Connect to MongoDB
+    # Connect to MongoDB for initial setup and indexing
     client = get_mongodb_client(host, port, user, password, db_name)
 
     if not wait_for_mongodb(client):
@@ -365,79 +439,129 @@ def ingest_fhir_data(
         "ExplanationOfBenefit": "explanationofbenefits",
     }
 
+    # Determine worker count
+    if max_workers is None:
+        max_workers = min(multiprocessing.cpu_count(), len(fhir_files))
+    actual_workers = min(max_workers, len(fhir_files)) if enable_parallel else 1
+
+    print_info(f"Using {actual_workers} worker processes for ingestion")
+    if enable_parallel and actual_workers > 1:
+        print_info("Parallel processing enabled for improved performance")
+    print()
+
+    # Connection config for workers
+    connection_config = {
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "db_name": db_name,
+    }
+
     # Initialize statistics
     stats = dict.fromkeys(resource_collections.values(), 0)
     stats["total_bundles"] = 0
     stats["total_resources"] = 0
     stats["errors"] = 0
 
-    # Process each FHIR file
-    print_info(f"Processing {len(fhir_files)} FHIR bundle files...")
-    print()
+    if enable_parallel and actual_workers > 1:
+        # Parallel processing
+        print_info(f"Processing {len(fhir_files)} FHIR bundle files in parallel...")
 
-    for idx, fhir_file in enumerate(fhir_files, 1):
-        try:
-            print_info(f"[{idx}/{len(fhir_files)}] Processing: {fhir_file.name}")
+        # Convert file paths to strings for multiprocessing
+        file_paths = [str(fhir_file) for fhir_file in fhir_files]
 
-            # Read and parse FHIR bundle
-            with open(fhir_file, encoding="utf-8") as f:
-                bundle = json.load(f)
+        # Process files in parallel
+        with multiprocessing.Pool(processes=actual_workers) as pool:
+            # Prepare arguments for each worker
+            worker_args = [
+                (file_path, connection_config, resource_collections) for file_path in file_paths
+            ]
 
-            resources = extract_resources_from_bundle(bundle)
+            # Process files and collect results
+            results = pool.starmap(process_fhir_file_worker, worker_args)
+
+        # Aggregate results
+        for file_name, file_stats, error_msg in results:
             stats["total_bundles"] += 1
 
-            if not resources:
-                print_warning(f"No resources found in {fhir_file.name}")
-                continue
+            if error_msg:
+                print_error(f"Error processing {file_name}: {error_msg}")
+                stats["errors"] += file_stats.get("errors", 1)
+            else:
+                # Aggregate successful file statistics
+                for key, value in file_stats.items():
+                    if key in stats:
+                        stats[key] += value
+    else:
+        # Sequential processing (fallback)
+        print_info(f"Processing {len(fhir_files)} FHIR bundle files sequentially...")
 
-            # Group resources by type
-            resources_by_type: dict[str, list[dict[str, Any]]] = {}
-            for resource in resources:
-                resource_type = resource.get("resourceType")
-                if resource_type in resource_collections:
-                    if resource_type not in resources_by_type:
-                        resources_by_type[resource_type] = []
-                    resources_by_type[resource_type].append(sanitize_resource(resource))
-                    stats["total_resources"] += 1
+        for idx, fhir_file in enumerate(fhir_files, 1):
+            try:
+                print_info(f"[{idx}/{len(fhir_files)}] Processing: {fhir_file.name}")
 
-            # Bulk insert by resource type
-            for resource_type, resources_list in resources_by_type.items():
-                collection_name = resource_collections[resource_type]
-                collection = db[collection_name]
+                # Read and parse FHIR bundle
+                with open(fhir_file, encoding="utf-8") as f:
+                    bundle = json.load(f)
 
-                try:
-                    # Create upsert operations based on FHIR ID
-                    operations = [
-                        UpdateOne(
-                            {"fhir_id": resource.get("fhir_id")}, {"$set": resource}, upsert=True
+                resources = extract_resources_from_bundle(bundle)
+                stats["total_bundles"] += 1
+
+                if not resources:
+                    print_warning(f"No resources found in {fhir_file.name}")
+                    continue
+
+                # Group resources by type
+                resources_by_type: dict[str, list[dict[str, Any]]] = {}
+                for resource in resources:
+                    resource_type = resource.get("resourceType")
+                    if resource_type in resource_collections:
+                        if resource_type not in resources_by_type:
+                            resources_by_type[resource_type] = []
+                        resources_by_type[resource_type].append(sanitize_resource(resource))
+                        stats["total_resources"] += 1
+
+                # Bulk insert by resource type
+                for resource_type, resources_list in resources_by_type.items():
+                    collection_name = resource_collections[resource_type]
+                    collection = db[collection_name]
+
+                    try:
+                        # Create upsert operations based on FHIR ID
+                        operations = [
+                            UpdateOne(
+                                {"fhir_id": resource.get("fhir_id")},
+                                {"$set": resource},
+                                upsert=True,
+                            )
+                            for resource in resources_list
+                        ]
+
+                        if operations:
+                            result = collection.bulk_write(operations, ordered=False)
+                            inserted = result.upserted_count + result.modified_count
+                            stats[collection_name] += inserted
+                            logger.debug(
+                                f"{resource_type}: {result.upserted_count} inserted, "
+                                f"{result.modified_count} modified"
+                            )
+
+                    except BulkWriteError as bwe:
+                        print_warning(
+                            f"Partial bulk write for {resource_type}: "
+                            f"{bwe.details.get('nInserted', 0)} inserted"
                         )
-                        for resource in resources_list
-                    ]
+                        stats[collection_name] += bwe.details.get("nInserted", 0)
+                        stats["errors"] += 1
 
-                    if operations:
-                        result = collection.bulk_write(operations, ordered=False)
-                        inserted = result.upserted_count + result.modified_count
-                        stats[collection_name] += inserted
-                        logger.debug(
-                            f"{resource_type}: {result.upserted_count} inserted, "
-                            f"{result.modified_count} modified"
-                        )
-
-                except BulkWriteError as bwe:
-                    print_warning(
-                        f"Partial bulk write for {resource_type}: "
-                        f"{bwe.details.get('nInserted', 0)} inserted"
-                    )
-                    stats[collection_name] += bwe.details.get("nInserted", 0)
-                    stats["errors"] += 1
-
-        except json.JSONDecodeError as e:
-            print_error(f"Invalid JSON in {fhir_file.name}: {e}")
-            stats["errors"] += 1
-        except Exception as e:
-            print_error(f"Error processing {fhir_file.name}: {e}")
-            logger.exception(f"Detailed error for {fhir_file.name}")
-            stats["errors"] += 1
+            except json.JSONDecodeError as e:
+                print_error(f"Invalid JSON in {fhir_file.name}: {e}")
+                stats["errors"] += 1
+            except Exception as e:
+                print_error(f"Error processing {fhir_file.name}: {e}")
+                logger.exception(f"Detailed error for {fhir_file.name}")
+                stats["errors"] += 1
 
     print()
 
@@ -447,7 +571,8 @@ def ingest_fhir_data(
     # Print summary statistics
     print_header("INGESTION COMPLETE")
 
-    print_success(f"Processed {stats['total_bundles']} bundles")
+    processing_mode = "parallel" if enable_parallel and actual_workers > 1 else "sequential"
+    print_success(f"Processed {stats['total_bundles']} bundles ({processing_mode} mode)")
     print_success(f"Ingested {stats['total_resources']} total resources")
 
     if stats["errors"] > 0:
@@ -494,7 +619,7 @@ def ingest_drug_data(
     Returns:
         Dictionary with ingestion statistics (drugs_ingested, errors)
     """
-    from healthcare_data_pipeline.models import RxNavDrugModel
+    from healthcare_data_pipeline.data_models import RxNavDrugModel
     from healthcare_data_pipeline.rxnav_extract import extract_drug_data
 
     print_header("DRUG DATA INGESTION PIPELINE (RXNAV)")

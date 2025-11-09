@@ -18,6 +18,7 @@ import base64
 import logging
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 
@@ -25,6 +26,8 @@ import google.generativeai as genai
 from pymongo import MongoClient, UpdateOne
 from pymongo.errors import BulkWriteError
 from tqdm import tqdm
+
+from healthcare_data_pipeline.config import load_config
 
 # ============================================================================
 # LOGGING CONFIGURATION
@@ -1374,30 +1377,79 @@ class FHIRTransformationPipeline:
         except Exception as e:
             logger.error(f"Bulk upsert error: {type(e).__name__}: {e}")
 
-    def transform_all(self) -> dict[str, dict[str, int]]:
-        """Transform all collections."""
+    def transform_all(
+        self, max_workers: int | None = None, enable_parallel: bool = True
+    ) -> dict[str, dict[str, int]]:
+        """Transform all collections with optional parallel processing."""
         all_stats = {}
 
         logger.info("Starting full transformation pipeline")
 
+        # Filter available collections
+        available_transformations = {}
         for source_coll, (target_coll, transform_func) in self.transformations.items():
-            if source_coll not in self.db.list_collection_names():
+            if source_coll in self.db.list_collection_names():
+                available_transformations[source_coll] = (target_coll, transform_func)
+            else:
                 logger.info(f"Collection {source_coll} not found, skipping")
-                continue
 
-            try:
-                stats = self.transform_collection(source_coll, target_coll, transform_func)
+        if not available_transformations:
+            logger.warning("No collections available for transformation")
+            return all_stats
 
-                all_stats[source_coll] = stats
+        # Determine worker count
+        if max_workers is None:
+            max_workers = min(4, len(available_transformations))  # Default to 4 workers max
+        actual_workers = min(max_workers, len(available_transformations)) if enable_parallel else 1
 
-                logger.info(
-                    f"{source_coll}: {stats['transformed']} transformed, "
-                    f"{stats['skipped']} skipped, {stats['errors']} errors"
-                )
+        logger.info(f"Using {actual_workers} worker threads for transformation")
 
-            except Exception as e:
-                logger.error(f"Error transforming {source_coll}: {type(e).__name__}: {e}")
-                all_stats[source_coll] = {"error": str(e)}
+        if enable_parallel and actual_workers > 1:
+            # Parallel transformation
+            logger.info("Parallel transformation enabled for improved performance")
+
+            with ThreadPoolExecutor(max_workers=actual_workers) as executor:
+                # Submit transformation tasks
+                future_to_collection = {}
+                for source_coll, (target_coll, transform_func) in available_transformations.items():
+                    future = executor.submit(
+                        self.transform_collection, source_coll, target_coll, transform_func
+                    )
+                    future_to_collection[future] = source_coll
+
+                # Collect results as they complete
+                for future in as_completed(future_to_collection):
+                    source_coll = future_to_collection[future]
+                    try:
+                        stats = future.result()
+                        all_stats[source_coll] = stats
+
+                        logger.info(
+                            f"{source_coll}: {stats['transformed']} transformed, "
+                            f"{stats['skipped']} skipped, {stats['errors']} errors"
+                        )
+
+                    except Exception as e:
+                        logger.error(f"Error transforming {source_coll}: {type(e).__name__}: {e}")
+                        all_stats[source_coll] = {"error": str(e)}
+        else:
+            # Sequential transformation (fallback)
+            logger.info("Sequential transformation mode")
+
+            for source_coll, (target_coll, transform_func) in available_transformations.items():
+                try:
+                    stats = self.transform_collection(source_coll, target_coll, transform_func)
+
+                    all_stats[source_coll] = stats
+
+                    logger.info(
+                        f"{source_coll}: {stats['transformed']} transformed, "
+                        f"{stats['skipped']} skipped, {stats['errors']} errors"
+                    )
+
+                except Exception as e:
+                    logger.error(f"Error transforming {source_coll}: {type(e).__name__}: {e}")
+                    all_stats[source_coll] = {"error": str(e)}
 
         return all_stats
 
@@ -1640,6 +1692,15 @@ Examples:
     # Configure logging level
     configure_logging(args.log_level)
 
+    # Load configuration (auto-loads if not already loaded)
+    config = load_config()
+
+    # Override config with command line args if provided
+    if args.gemini_key:
+        config.gemini.api_key = args.gemini_key
+    if hasattr(args, "no_gemini") and args.no_gemini:
+        config.gemini.enabled = False
+
     # Connect to MongoDB
     connection_string = (
         f"mongodb://{args.user}:{args.password}@{args.host}:{args.port}/"
@@ -1659,13 +1720,13 @@ Examples:
         sys.exit(1)
 
     # Initialize pipeline
-    use_gemini = not args.no_gemini
+    use_gemini = config.gemini.enabled and config.gemini.api_key is not None
 
     try:
         pipeline = FHIRTransformationPipeline(
             mongo_client=client,
             db_name=args.db_name,
-            gemini_api_key=args.gemini_key,
+            gemini_api_key=config.gemini.api_key,
             use_gemini=use_gemini,
         )
     except RuntimeError as e:
@@ -1690,7 +1751,13 @@ Examples:
                 else:
                     logger.warning(f"[WARNING] Unknown collection: {collection}")
         else:
-            all_stats = pipeline.transform_all()
+            # Use configuration settings for parallel processing
+            enable_parallel = config.pipeline.enable_parallel_transformation
+            max_workers = config.pipeline.max_workers
+
+            all_stats = pipeline.transform_all(
+                max_workers=max_workers, enable_parallel=enable_parallel
+            )
 
         pipeline.create_indexes()
         pipeline.print_summary(all_stats)

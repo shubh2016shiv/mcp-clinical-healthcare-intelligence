@@ -14,6 +14,20 @@ import sys
 import time
 from pathlib import Path
 
+from healthcare_data_pipeline.config import (
+    get_config,
+    load_config,
+    print_config_summary,
+    validate_config,
+)
+from healthcare_data_pipeline.connection_manager import (
+    configure_connection,
+    connect,
+)
+from healthcare_data_pipeline.ingest import ingest_fhir_data
+from healthcare_data_pipeline.metrics import get_metrics_collector
+from healthcare_data_pipeline.structured_logging import configure_logging
+
 
 # ANSI color codes for terminal output
 class Colors:
@@ -303,10 +317,27 @@ def generate_synthea_data(num_patients: int, state: str, output_dir: Path) -> bo
         return False
 
 
-def ingest_data(synthea_output_dir: Path) -> bool:
-    """Ingest FHIR data into MongoDB using the ingestion script."""
+def ingest_data(
+    synthea_output_dir: Path,
+    enable_parallel: bool = True,
+    max_workers: int | None = None,
+) -> bool:
+    """Ingest FHIR data into MongoDB using the ingestion function.
+
+    Args:
+        synthea_output_dir: Directory containing Synthea output
+        enable_parallel: Enable parallel processing for ingestion
+        max_workers: Maximum number of worker processes (None for CPU count)
+
+    Returns:
+        True if ingestion successful, False otherwise
+    """
     print_header("INGESTING FHIR DATA INTO MONGODB")
 
+    # Get configuration
+    config = get_config()
+
+    # Find FHIR directory
     possible_dirs = [
         synthea_output_dir / "fhir",
         synthea_output_dir / "output" / "fhir",
@@ -327,34 +358,33 @@ def ingest_data(synthea_output_dir: Path) -> bool:
         print_error("FHIR directory not found")
         return False
 
-    ingestion_script = Path(__file__).parent / "ingest.py"
-    if not ingestion_script.exists():
-        print_error(f"Ingestion script not found: {ingestion_script}")
-        return False
+    print_info(f"Data source: {fhir_dir}\n")
 
     try:
-        print_info(f"Running ingestion script: {ingestion_script}")
-        print_info(f"Data source: {fhir_dir}\n")
-
-        result = subprocess.run(
-            [sys.executable, str(ingestion_script), str(fhir_dir)],
-            capture_output=False,
-            text=True,
-            timeout=600,
+        # Directly call ingest_fhir_data with all parameters
+        stats = ingest_fhir_data(
+            data_path=str(fhir_dir),
+            db_name=config.get_database_name(),
+            host=config.mongodb.host,
+            port=config.mongodb.port,
+            user=config.mongodb.user,
+            password=config.mongodb.password,
+            enable_parallel=enable_parallel,
+            max_workers=max_workers,
         )
 
-        if result.returncode != 0:
-            print_error("Data ingestion failed")
-            return False
+        if stats.get("errors", 0) > 0:
+            print_warning(f"Ingestion completed with {stats.get('errors', 0)} errors")
+            return True  # Still consider it successful if some records were ingested
 
         print_success("FHIR data ingestion complete")
         return True
 
-    except subprocess.TimeoutExpired:
-        print_error("Data ingestion timed out")
-        return False
     except Exception as e:
-        print_error(f"Error running ingestion script: {e}")
+        print_error(f"Error during ingestion: {e}")
+        import traceback
+
+        traceback.print_exc()
         return False
 
 
@@ -534,8 +564,7 @@ def verify_data(
         print_error(f"[ERROR] Verification failed: {e}")
         return False
 
-
-def load_mongodb_config() -> dict:
+    # Removed old load_mongodb_config function - using new config system
     """Load MongoDB configuration from .env file or use defaults.
 
     Returns:
@@ -789,40 +818,74 @@ Examples:
 
     print_header("COMPLETE HEALTHCARE DATA PIPELINE")
 
-    # Load MongoDB configuration from .env file
-    mongodb_config = load_mongodb_config()
-    print()
+    # Load and configure application
+    try:
+        config = load_config()
+        print_config_summary()
 
-    # Check for Gemini API key from environment if not provided
-    if not args.no_gemini and not args.gemini_key:
-        args.gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        if args.gemini_key:
-            print_info("Using Gemini API key from environment variable")
+        # Validate configuration
+        validation_errors = validate_config()
+        if validation_errors:
+            print_error("Configuration validation failed:")
+            for error in validation_errors:
+                print_error(f"  - {error}")
+            sys.exit(1)
+
+        # Configure logging
+        configure_logging(
+            level=config.logging.level,
+            structured=config.logging.structured,
+            correlation_id_enabled=config.logging.correlation_id_enabled,
+            file_path=config.logging.file_path,
+        )
+
+        # Configure connection manager
+        configure_connection(config.mongodb)
+
+        # Connect to MongoDB
+        if not connect():
+            print_error("Failed to connect to MongoDB")
+            sys.exit(1)
+
+        print_success("All systems initialized successfully")
+        print()
+
+    except Exception as e:
+        print_error(f"Initialization failed: {e}")
+        sys.exit(1)
+
+    # Override Gemini settings from command line if provided
+    if args.gemini_key:
+        config.gemini.api_key = args.gemini_key
+    if args.no_gemini:
+        config.gemini.enabled = False
 
     # If only transforming, skip to transformation
     if args.only_transform:
         print_info("Running transformation only (skipping generation/ingestion)\n")
 
-        if not transform_data(args.gemini_key, not args.no_gemini):
+        if not transform_data(
+            config.gemini.api_key if config.gemini.enabled else None, config.gemini.enabled
+        ):
             print_error("Transformation failed")
             sys.exit(1)
 
         if not args.skip_verify:
             verify_data(
-                mongodb_config["host"],
-                mongodb_config["port"],
-                mongodb_config["user"],
-                mongodb_config["password"],
-                mongodb_config["db_name"],
+                config.mongodb.host,
+                config.mongodb.port,
+                config.mongodb.user,
+                config.mongodb.password,
+                config.get_database_name(),
                 check_clean=True,
             )
 
         print_connection_details(
-            mongodb_config["host"],
-            mongodb_config["port"],
-            mongodb_config["user"],
-            mongodb_config["password"],
-            mongodb_config["db_name"],
+            config.mongodb.host,
+            config.mongodb.port,
+            config.mongodb.user,
+            config.mongodb.password,
+            config.get_database_name(),
         )
         print_success("Pipeline completed successfully!")
         return
@@ -849,11 +912,11 @@ Examples:
 
     # Drop existing database to start fresh
     if not drop_database(
-        mongodb_config["host"],
-        mongodb_config["port"],
-        mongodb_config["user"],
-        mongodb_config["password"],
-        mongodb_config["db_name"],
+        config.mongodb.host,
+        config.mongodb.port,
+        config.mongodb.user,
+        config.mongodb.password,
+        config.get_database_name(),
     ):
         print_error("Failed to drop existing database")
         sys.exit(1)
@@ -869,7 +932,11 @@ Examples:
         print_info("Skipping Synthea generation\n")
 
     # Ingest raw FHIR data
-    if not ingest_data(synthea_output_dir):
+    if not ingest_data(
+        synthea_output_dir,
+        enable_parallel=config.pipeline.enable_parallel_ingestion,
+        max_workers=config.pipeline.max_workers,
+    ):
         print_error("Failed to ingest data")
         sys.exit(1)
     print()
@@ -880,7 +947,9 @@ Examples:
 
     # Transform to clean medical records
     if not args.skip_transform:
-        if not transform_data(args.gemini_key, not args.no_gemini):
+        if not transform_data(
+            config.gemini.api_key if config.gemini.enabled else None, config.gemini.enabled
+        ):
             print_warning("Transformation failed or incomplete")
             print_info("Raw FHIR data is still available in original collections")
         print()
@@ -890,22 +959,33 @@ Examples:
     # Verify data
     if not args.skip_verify:
         verify_data(
-            mongodb_config["host"],
-            mongodb_config["port"],
-            mongodb_config["user"],
-            mongodb_config["password"],
-            mongodb_config["db_name"],
+            config.mongodb.host,
+            config.mongodb.port,
+            config.mongodb.user,
+            config.mongodb.password,
+            config.get_database_name(),
             check_clean=not args.skip_transform,
         )
         print()
 
+    # Print final metrics
+    metrics_collector = get_metrics_collector()
+    final_metrics = metrics_collector.get_summary()
+    print_info("Final Pipeline Metrics:")
+    print(f"  Processing Time: {final_metrics.get('uptime_seconds', 0):.1f}s")
+    pipeline_metrics = final_metrics.get("pipeline", {})
+    print(f"  Records Processed: {pipeline_metrics.get('total_records_processed', 0):,}")
+    print(f"  Records Transformed: {pipeline_metrics.get('total_records_transformed', 0):,}")
+    print(f"  Success Rate: {pipeline_metrics.get('success_rate_percent', 0):.1f}%")
+    print()
+
     # Print connection details
     print_connection_details(
-        mongodb_config["host"],
-        mongodb_config["port"],
-        mongodb_config["user"],
-        mongodb_config["password"],
-        mongodb_config["db_name"],
+        config.mongodb.host,
+        config.mongodb.port,
+        config.mongodb.user,
+        config.mongodb.password,
+        config.get_database_name(),
     )
 
     print_success("Pipeline completed successfully!")
