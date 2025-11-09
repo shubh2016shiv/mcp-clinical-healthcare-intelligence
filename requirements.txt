@@ -191,6 +191,8 @@ jmespath==1.0.1
     #   botocore
 joblib==1.5.2
     # via nltk
+jsonpath-ng==1.7.0
+    # via text-to-mongodb (pyproject.toml)
 jsonschema==4.25.1
     # via mcp
 jsonschema-path==0.3.4
@@ -262,6 +264,8 @@ platformdirs==4.5.0
     #   banks
     #   fastmcp
     #   llama-index-core
+ply==3.11
+    # via jsonpath-ng
 propcache==0.4.1
     # via
     #   aiohttp
