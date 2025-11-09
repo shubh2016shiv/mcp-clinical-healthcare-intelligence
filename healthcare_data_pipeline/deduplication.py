@@ -130,7 +130,7 @@ class DeduplicationEngine:
         # Patients - deduplicate by name and birth date
         self.add_rule(
             DeduplicationRule(
-                collection_name="clean_patients",
+                collection_name="patients",
                 fields=["first_name", "last_name", "birth_date"],
                 case_sensitive=False,
             )
@@ -139,7 +139,7 @@ class DeduplicationEngine:
         # Conditions - deduplicate by patient and condition name
         self.add_rule(
             DeduplicationRule(
-                collection_name="clean_conditions",
+                collection_name="conditions",
                 fields=["patient_id", "condition_name"],
                 case_sensitive=False,
             )
@@ -148,7 +148,7 @@ class DeduplicationEngine:
         # Observations - deduplicate by patient, test name, and date
         self.add_rule(
             DeduplicationRule(
-                collection_name="clean_observations",
+                collection_name="observations",
                 fields=["patient_id", "test_name", "test_date"],
                 case_sensitive=False,
             )
@@ -157,7 +157,7 @@ class DeduplicationEngine:
         # Medications - deduplicate by patient, medication name, and date
         self.add_rule(
             DeduplicationRule(
-                collection_name="clean_medications",
+                collection_name="medications",
                 fields=["patient_id", "medication_name", "prescribed_date"],
                 case_sensitive=False,
             )
@@ -166,7 +166,7 @@ class DeduplicationEngine:
         # Encounters - deduplicate by patient and start date
         self.add_rule(
             DeduplicationRule(
-                collection_name="clean_encounters",
+                collection_name="encounters",
                 fields=["patient_id", "start_date"],
                 case_sensitive=False,
             )

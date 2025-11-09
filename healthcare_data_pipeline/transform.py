@@ -1031,21 +1031,46 @@ class FHIRTransformationPipeline:
     def __init__(
         self,
         mongo_client: MongoClient,
-        db_name: str = "fhir_db",
+        source_db_name: str = "fhir_db",
+        target_db_name: str = "fhir_db",
         gemini_api_key: str | None = None,
         use_gemini: bool = True,
+        collection_mapping: dict[str, str] | None = None,
     ):
         """Initialize transformation pipeline.
 
         Args:
             mongo_client: MongoDB client instance
-            db_name: Database name
+            source_db_name: Database name to read from (raw data source)
+            target_db_name: Database name to write to (transformed data destination, always fhir_db)
             gemini_api_key: Google AI API key for Gemini
             use_gemini: Whether to use Gemini for enrichment
+            collection_mapping: Mapping from ingestion collection names to final collection names.
+                If None, uses default mapping from config.
         """
         self.client = mongo_client
-        self.db = mongo_client[db_name]
+        self.source_db = mongo_client[source_db_name]
+        self.target_db = mongo_client[target_db_name]
         self.gemini = None
+
+        # Store collection mapping (ingestion_name -> final_name)
+        # Default mapping if not provided
+        if collection_mapping is None:
+            collection_mapping = {
+                "allergyintolerances": "allergies",
+                "conditions": "conditions",
+                "observations": "observations",
+                "medicationrequests": "medications",
+                "immunizations": "immunizations",
+                "procedures": "procedures",
+                "encounters": "encounters",
+                "careplans": "care_plans",
+                "patients": "patients",
+                "diagnosticreports": "diagnosticreports",  # Fixed: no underscore
+                "claims": "claims",
+                "explanationofbenefits": "explanationofbenefits",
+            }
+        self.collection_mapping = collection_mapping
 
         # Validate helper functions are available
         self._validate_dependencies()
@@ -1133,8 +1158,8 @@ class FHIRTransformationPipeline:
         # Initialize error tracker
         error_tracker = ErrorTracker(max_samples=5)
 
-        source_coll = self.db[source_collection]
-        target_coll = self.db[target_collection]
+        source_coll = self.source_db[source_collection]
+        target_coll = self.target_db[target_collection]
 
         total_docs = source_coll.count_documents({})
 
@@ -1146,12 +1171,31 @@ class FHIRTransformationPipeline:
             f"[INFO] Transforming {source_collection} -> {target_collection} ({total_docs} docs)"
         )
 
+        # If source and target are the same collection, read all documents FIRST before dropping
+        # This prevents losing data when dropping the collection
+        if self.source_db.name == self.target_db.name and source_collection == target_collection:
+            logger.info(
+                f"[INFO] Overwrite mode: reading documents before dropping {target_collection} collection"
+            )
+            # Materialize cursor into list before dropping collection
+            source_documents = list(source_coll.find({}))
+            logger.info(f"[INFO] Read {len(source_documents)} documents from {source_collection}")
+
+            # Now safe to drop since we have all documents in memory
+            logger.info(f"[INFO] Dropping existing {target_collection} collection")
+            target_coll.drop()
+            logger.info(f"[INFO] Dropped {target_collection} collection for clean transformation")
+
+            # Use the materialized list instead of cursor
+            document_iterator = source_documents
+        else:
+            # Different collections or databases - safe to use cursor
+            document_iterator = source_coll.find({})
+
         batch = []
 
         with tqdm(total=total_docs, desc=f"Processing {source_collection}") as pbar:
-            cursor = source_coll.find({})
-
-            for doc in cursor:
+            for doc in document_iterator:
                 stats["processed"] += 1
 
                 try:
@@ -1255,36 +1299,48 @@ class FHIRTransformationPipeline:
         return stats
 
     def _identify_enrichment_fields(self, transformed_doc: dict, collection_name: str) -> dict:
-        """Identify which fields in a document are enrichment fields added by Gemini."""
+        """Identify which fields in a document are enrichment fields added by Gemini.
+
+        Args:
+            transformed_doc: The transformed document
+            collection_name: The collection name (ingestion name during transformation)
+
+        Returns:
+            Dictionary of enrichment fields found in the document
+        """
+        # Map collection_name (ingestion name) to final name for lookup
+        final_name = self.collection_mapping.get(collection_name, collection_name)
+
         enrichment_field_map = {
-            "clean_conditions": [
+            "conditions": [
                 "description",
                 "category",
                 "patient_explanation",
                 "severity_indicator",
             ],
-            "clean_medications": [
+            "medications": [
                 "indication",
                 "drug_class",
                 "common_side_effects",
                 "patient_friendly_name",
             ],
-            "clean_observations": ["interpretation", "clinical_significance", "risk_level"],
-            "clean_procedures": ["purpose", "category", "patient_explanation", "complexity"],
-            "clean_allergies": ["avoidance_tips", "cross_reactions", "common_symptoms"],
-            "clean_care_plans": ["plan_description", "expected_outcomes"],
-            "clean_immunizations": ["purpose", "prevents"],
-            "clean_diagnostic_reports": [
+            "observations": ["interpretation", "clinical_significance", "risk_level"],
+            "procedures": ["purpose", "category", "patient_explanation", "complexity"],
+            "allergies": ["avoidance_tips", "cross_reactions", "common_symptoms"],
+            "care_plans": ["plan_description", "expected_outcomes"],
+            "immunizations": ["purpose", "prevents"],
+            "diagnosticreports": [  # Fixed: use final name from mapping (no underscore)
                 "clinical_summary",
                 "key_diagnoses",
                 "medications_mentioned",
                 "key_findings",
             ],
-            "clean_encounters": ["visit_type_description", "typical_activities"],
+            "encounters": ["visit_type_description", "typical_activities"],
         }
 
         enrichment_fields = {}
-        fields_to_check = enrichment_field_map.get(collection_name, [])
+        # Use final collection name to look up enrichment fields
+        fields_to_check = enrichment_field_map.get(final_name, [])
 
         for field in fields_to_check:
             if field in transformed_doc and transformed_doc[field] is not None:
@@ -1300,7 +1356,12 @@ class FHIRTransformationPipeline:
 
     @property
     def transformations(self) -> dict:
-        """Lazy-load transformation functions after they are all defined."""
+        """Lazy-load transformation functions after they are all defined.
+
+        During transformation, we use the ingestion collection name (source) as the target
+        collection name. After all transformations complete, we rename collections based on
+        the collection_mapping to their final names.
+        """
         if self._transformations is None:
             transformations_map = {
                 "allergyintolerances": "transform_allergy",
@@ -1315,22 +1376,11 @@ class FHIRTransformationPipeline:
                 "diagnosticreports": "transform_diagnostic_report",
             }
 
-            collection_map = {
-                "allergyintolerances": "clean_allergies",
-                "conditions": "clean_conditions",
-                "observations": "clean_observations",
-                "medicationrequests": "clean_medications",
-                "immunizations": "clean_immunizations",
-                "procedures": "clean_procedures",
-                "encounters": "clean_encounters",
-                "careplans": "clean_care_plans",
-                "patients": "clean_patients",
-                "diagnosticreports": "clean_diagnostic_reports",
-            }
-
             self._transformations = {}
             for source_coll, func_name in transformations_map.items():
-                target_coll = collection_map[source_coll]
+                # During transformation, use the same collection name as source (ingestion name)
+                # This ensures we write to the ingestion collection name, then rename at the end
+                target_coll = source_coll  # Use ingestion name during transformation
                 func = globals().get(func_name)
 
                 if func is None or not callable(func):
@@ -1377,6 +1427,56 @@ class FHIRTransformationPipeline:
         except Exception as e:
             logger.error(f"Bulk upsert error: {type(e).__name__}: {e}")
 
+    def rename_collections(self) -> None:
+        """Rename collections from ingestion names to final names based on collection_mapping.
+
+        This is called after all transformations complete. Collections are renamed from
+        their ingestion names (e.g., 'diagnosticreports') to their final names based on
+        the collection_mapping configuration.
+
+        Only renames collections where ingestion_name != final_name. If target collection
+        already exists, it is dropped first (overwrite mode).
+        """
+        logger.info("Renaming collections to final names based on mapping...")
+
+        rename_count = 0
+        skip_count = 0
+
+        for ingestion_name, final_name in self.collection_mapping.items():
+            # Skip if names are the same (no rename needed)
+            if ingestion_name == final_name:
+                skip_count += 1
+                continue
+
+            # Check if source collection exists
+            if ingestion_name not in self.target_db.list_collection_names():
+                logger.debug(f"Collection {ingestion_name} not found, skipping rename")
+                continue
+
+            # Check if target collection already exists
+            if final_name in self.target_db.list_collection_names():
+                logger.warning(
+                    f"Target collection {final_name} already exists. "
+                    f"Dropping it before renaming {ingestion_name} -> {final_name}"
+                )
+                self.target_db[final_name].drop()
+
+            try:
+                # Rename collection using MongoDB's rename_collection command
+                # This is atomic and efficient
+                self.target_db[ingestion_name].rename(final_name)
+                logger.info(f"Renamed collection: {ingestion_name} -> {final_name}")
+                rename_count += 1
+            except Exception as e:
+                logger.error(
+                    f"Failed to rename collection {ingestion_name} -> {final_name}: "
+                    f"{type(e).__name__}: {e}"
+                )
+
+        logger.info(
+            f"Collection renaming complete: {rename_count} renamed, {skip_count} skipped (same name)"
+        )
+
     def transform_all(
         self, max_workers: int | None = None, enable_parallel: bool = True
     ) -> dict[str, dict[str, int]]:
@@ -1388,7 +1488,7 @@ class FHIRTransformationPipeline:
         # Filter available collections
         available_transformations = {}
         for source_coll, (target_coll, transform_func) in self.transformations.items():
-            if source_coll in self.db.list_collection_names():
+            if source_coll in self.source_db.list_collection_names():
                 available_transformations[source_coll] = (target_coll, transform_func)
             else:
                 logger.info(f"Collection {source_coll} not found, skipping")
@@ -1451,54 +1551,59 @@ class FHIRTransformationPipeline:
                     logger.error(f"Error transforming {source_coll}: {type(e).__name__}: {e}")
                     all_stats[source_coll] = {"error": str(e)}
 
+        # After all transformations complete, rename collections to their final names
+        logger.info("All transformations complete. Renaming collections to final names...")
+        self.rename_collections()
+
         return all_stats
 
     def create_indexes(self) -> None:
-        """Create indexes on clean collections."""
-        logger.info("Creating indexes on clean collections...")
+        """Create indexes on transformed collections using final collection names."""
+        logger.info("Creating indexes on transformed collections...")
 
+        # Index definitions keyed by final collection names (after mapping)
         index_definitions = {
-            "clean_allergies": [
+            "allergies": [
                 ("patient_id", {}),
                 ("allergy_name", {}),
                 ("category", {}),
             ],
-            "clean_conditions": [
+            "conditions": [
                 ("patient_id", {}),
                 ("condition_name", {}),
                 ("status", {}),
             ],
-            "clean_observations": [
+            "observations": [
                 ("patient_id", {}),
                 ("test_name", {}),
                 ("observation_type", {}),
             ],
-            "clean_medications": [
+            "medications": [
                 ("patient_id", {}),
                 ("medication_name", {}),
                 ("status", {}),
             ],
-            "clean_immunizations": [
+            "immunizations": [
                 ("patient_id", {}),
                 ("vaccine_name", {}),
             ],
-            "clean_procedures": [
+            "procedures": [
                 ("patient_id", {}),
                 ("procedure_name", {}),
             ],
-            "clean_encounters": [
+            "encounters": [
                 ("patient_id", {}),
                 ("encounter_type", {}),
             ],
-            "clean_care_plans": [
+            "care_plans": [
                 ("patient_id", {}),
                 ("plan_name", {}),
             ],
-            "clean_patients": [
+            "patients": [
                 ("patient_id", {"unique": True}),
                 ("last_name", {}),
             ],
-            "clean_diagnostic_reports": [
+            "diagnosticreports": [  # Fixed: use final name from mapping (no underscore)
                 ("patient_id", {}),
                 ("report_type", {}),
             ],
@@ -1506,9 +1611,11 @@ class FHIRTransformationPipeline:
 
         indexes_created = 0
 
+        # Use final collection names from mapping
         for collection_name, indexes in index_definitions.items():
-            if collection_name in self.db.list_collection_names():
-                collection = self.db[collection_name]
+            # Check if collection exists (using final name after renaming)
+            if collection_name in self.target_db.list_collection_names():
+                collection = self.target_db[collection_name]
 
                 for index_field, index_options in indexes:
                     try:
@@ -1669,7 +1776,21 @@ Examples:
     parser.add_argument("--port", type=int, default=27017, help="MongoDB port (default: 27017)")
     parser.add_argument("--user", default="admin", help="MongoDB username (default: admin)")
     parser.add_argument("--password", default="mongopass123", help="MongoDB password")
-    parser.add_argument("--db-name", default="fhir_db", help="Database name (default: fhir_db)")
+    parser.add_argument(
+        "--db-name",
+        default="fhir_db",
+        help="Database name (default: fhir_db, deprecated - use --source-db-name and --target-db-name)",
+    )
+    parser.add_argument(
+        "--source-db-name",
+        default=None,
+        help="Source database name to read from (default: uses --db-name if not specified)",
+    )
+    parser.add_argument(
+        "--target-db-name",
+        default=None,
+        help="Target database name to write to (default: uses --db-name if not specified)",
+    )
     parser.add_argument("--gemini-key", help="Google AI API key for Gemini (optional)")
     parser.add_argument("--no-gemini", action="store_true", help="Disable Gemini enrichment")
     parser.add_argument(
@@ -1720,12 +1841,21 @@ Examples:
     # Initialize pipeline
     use_gemini = config.gemini.enabled and config.gemini.api_key is not None
 
+    # Determine source and target database names
+    source_db_name = args.source_db_name if args.source_db_name else args.db_name
+    target_db_name = args.target_db_name if args.target_db_name else args.db_name
+
     try:
+        # Get collection mapping from config
+        collection_mapping = config.collection_mapping.mapping
+
         pipeline = FHIRTransformationPipeline(
             mongo_client=client,
-            db_name=args.db_name,
+            source_db_name=source_db_name,
+            target_db_name=target_db_name,
             gemini_api_key=config.gemini.api_key,
             use_gemini=use_gemini,
+            collection_mapping=collection_mapping,
         )
     except RuntimeError as e:
         logger.error(f"[ERROR] Pipeline initialization failed: {e}")

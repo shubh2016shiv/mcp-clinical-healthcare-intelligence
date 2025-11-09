@@ -79,6 +79,61 @@ class PipelineConfig(BaseModel):
     dlq_enabled: bool = Field(default=True, description="Enable dead letter queue")
     metrics_enabled: bool = Field(default=True, description="Enable metrics collection")
     data_quality_enabled: bool = Field(default=True, description="Enable data quality validation")
+    keep_raw_fhir_data: bool = Field(
+        default=False,
+        description="If True, raw FHIR data is preserved in fhir_raw_db; if False, raw data is overwritten by transformed data in fhir_db",
+    )
+
+
+class CollectionMappingConfig(BaseModel):
+    """Collection name mapping configuration.
+
+    Maps ingestion collection names (source) to final transformed collection names (target).
+    During transformation, data is written to the source collection name, then renamed
+    to the target name after all transformations complete.
+    """
+
+    # Default collection mapping: ingestion_name -> final_name
+    mapping: dict[str, str] = Field(
+        default_factory=lambda: {
+            "allergyintolerances": "allergies",
+            "conditions": "conditions",
+            "observations": "observations",
+            "medicationrequests": "medications",
+            "immunizations": "immunizations",
+            "procedures": "procedures",
+            "encounters": "encounters",
+            "careplans": "care_plans",
+            "patients": "patients",
+            "diagnosticreports": "diagnosticreports",  # Fixed: no underscore to match ingestion
+            "claims": "claims",
+            "explanationofbenefits": "explanationofbenefits",
+        },
+        description="Mapping from ingestion collection names to final transformed collection names",
+    )
+
+    def get_final_name(self, ingestion_name: str) -> str:
+        """Get final collection name for a given ingestion collection name.
+
+        Args:
+            ingestion_name: The collection name used during ingestion
+
+        Returns:
+            The final collection name after transformation (same as ingestion_name if not mapped)
+        """
+        return self.mapping.get(ingestion_name, ingestion_name)
+
+    def get_ingestion_name(self, final_name: str) -> str:
+        """Get ingestion collection name for a given final collection name (reverse lookup).
+
+        Args:
+            final_name: The final collection name
+
+        Returns:
+            The ingestion collection name, or final_name if not found in reverse mapping
+        """
+        reverse_map = {v: k for k, v in self.mapping.items()}
+        return reverse_map.get(final_name, final_name)
 
 
 class GeminiConfig(BaseModel):
@@ -118,6 +173,10 @@ class ApplicationConfig(BaseModel):
     )
     gemini: GeminiConfig = Field(
         default_factory=GeminiConfig, description="Gemini AI configuration"
+    )
+    collection_mapping: CollectionMappingConfig = Field(
+        default_factory=CollectionMappingConfig,
+        description="Collection name mapping configuration",
     )
 
     @field_validator("project_root")
@@ -248,6 +307,7 @@ class ConfigManager:
             user=os.environ.get("MONGODB_USER", "admin"),
             password=os.environ.get("MONGODB_PASSWORD", "mongopass123"),
             db_name=os.environ.get("MONGODB_DATABASE", "fhir_db"),
+            raw_db_name=os.environ.get("MONGODB_RAW_DATABASE", "fhir_raw_db"),
             auth_source=os.environ.get("MONGODB_AUTH_SOURCE", "admin"),
             max_pool_size=int(os.environ.get("MONGODB_MAX_POOL_SIZE", "10")),
             min_pool_size=int(os.environ.get("MONGODB_MIN_POOL_SIZE", "2")),
@@ -300,6 +360,7 @@ class ConfigManager:
             metrics_enabled=os.environ.get("PIPELINE_METRICS_ENABLED", "true").lower() == "true",
             data_quality_enabled=os.environ.get("PIPELINE_DATA_QUALITY_ENABLED", "true").lower()
             == "true",
+            keep_raw_fhir_data=os.environ.get("KEEP_RAW_FHIR_DATA", "false").lower() == "true",
         )
 
         # Gemini configuration
@@ -311,6 +372,9 @@ class ConfigManager:
             enabled=os.environ.get("GEMINI_ENABLED", "true").lower() == "true",
         )
 
+        # Collection mapping configuration (uses defaults, can be overridden via env vars in future)
+        collection_mapping_config = CollectionMappingConfig()
+
         # Create application config
         config = ApplicationConfig(
             environment=environment,
@@ -319,6 +383,7 @@ class ConfigManager:
             logging=logging_config,
             pipeline=pipeline_config,
             gemini=gemini_config,
+            collection_mapping=collection_mapping_config,
         )
 
         self._config = config
@@ -475,6 +540,7 @@ MONGODB_PORT=27017
 MONGODB_USER=admin
 MONGODB_PASSWORD=mongopass123
 MONGODB_DATABASE=fhir_db
+MONGODB_RAW_DATABASE=fhir_raw_db
 MONGODB_AUTH_SOURCE=admin
 
 # MongoDB Connection Pool Settings
@@ -514,6 +580,7 @@ PIPELINE_CHECKPOINT_ENABLED=true
 PIPELINE_DLQ_ENABLED=true
 PIPELINE_METRICS_ENABLED=true
 PIPELINE_DATA_QUALITY_ENABLED=true
+KEEP_RAW_FHIR_DATA=false
 
 # Gemini AI Configuration
 GEMINI_API_KEY=your_gemini_api_key_here

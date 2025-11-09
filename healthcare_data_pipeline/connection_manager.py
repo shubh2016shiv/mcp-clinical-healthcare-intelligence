@@ -47,6 +47,10 @@ class ConnectionConfig(BaseModel):
     user: str = Field(default="admin", description="MongoDB username")
     password: str = Field(default="mongopass123", description="MongoDB password")
     db_name: str = Field(default="fhir_db", description="Default database name")
+    raw_db_name: str = Field(
+        default="fhir_raw_db",
+        description="Database name for storing raw FHIR data when keep_raw_fhir_data=True",
+    )
     auth_source: str = Field(default="admin", description="Authentication database")
     max_pool_size: int = Field(default=10, description="Maximum connection pool size", ge=1)
     min_pool_size: int = Field(default=2, description="Minimum connection pool size", ge=1)

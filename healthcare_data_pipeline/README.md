@@ -564,10 +564,9 @@ Pipeline Initialization
          └─ Find all raw collections: patients, conditions, etc.
             ↓
     └─→ Discover Transformations
-         ├─ patients → clean_patients
-         ├─ conditions → clean_conditions
-         ├─ observations → clean_observations (split by type)
-         └─ Other mappings...
+         ├─ Transform to ingestion collection names (e.g., diagnosticreports → diagnosticreports)
+         ├─ Apply transformations in place
+         └─ Rename to final names after all transformations complete (based on collection_mapping)
             ↓
     └─→ Create ThreadPool (for each collection)
          └─ Threads = min(6, max_workers config)
@@ -584,7 +583,7 @@ Pipeline Initialization
          │   │   └─ On error: send to DLQ
          │   ├─ Batch into groups of 500
          │   ├─ Create retry handler
-         │   └─ Bulk upsert to clean_patients
+         │   └─ Bulk upsert to patients
          │       └─ Retry on transient failures
          │
          ├─→ Collection Transform Task 2: Conditions
@@ -1010,6 +1009,46 @@ if errors:
     sys.exit(1)  # Fail fast if misconfigured
 ```
 
+**Raw Data Preservation (keep_raw_fhir_data Flag)**:
+
+The pipeline supports a `KEEP_RAW_FHIR_DATA` configuration flag that controls whether raw FHIR data is preserved in a separate database:
+
+- **`KEEP_RAW_FHIR_DATA=false` (default)**: Raw data is ingested into `fhir_db` and then overwritten by transformed data in the same collections. This is the most storage-efficient approach, using only one database.
+
+- **`KEEP_RAW_FHIR_DATA=true`**: Raw data is ingested into `fhir_raw_db` and transformed data is written to `fhir_db` using the same collection names (without "clean_" prefixes). This preserves the original FHIR data for audit or reprocessing purposes.
+
+**Collection Naming**:
+- Transformed collections use the original collection names (e.g., `patients`, `conditions`, `medications`) without "clean_" prefixes
+- This eliminates duplicate collections and reduces storage costs
+- When `keep_raw_fhir_data=false`, transformations overwrite the original collections in place
+- When `keep_raw_fhir_data=true`, raw data remains in `fhir_raw_db` and transformed data is in `fhir_db`
+
+**Centralized Collection Mapping**:
+- Collection name mappings are centralized in `config.py` via `CollectionMappingConfig`
+- Maps ingestion collection names to final transformed collection names
+- During transformation, data is written to ingestion collection names, then renamed to final names after all transformations complete
+- This ensures consistent naming and makes collection management easier
+
+**Collection Mapping (Ingestion → Final)**:
+- `allergyintolerances` → `allergies`
+- `conditions` → `conditions`
+- `observations` → `observations`
+- `medicationrequests` → `medications`
+- `immunizations` → `immunizations`
+- `procedures` → `procedures`
+- `encounters` → `encounters`
+- `careplans` → `care_plans`
+- `patients` → `patients`
+- `diagnosticreports` → `diagnosticreports`
+- `claims` → `claims`
+- `explanationofbenefits` → `explanationofbenefits`
+
+**Environment Variables**:
+```
+KEEP_RAW_FHIR_DATA=false
+MONGODB_RAW_DATABASE=fhir_raw_db
+```
+
 ### Monitoring & Alerting
 
 **Key Metrics to Monitor**:
@@ -1111,8 +1150,8 @@ dlq_records = db.dlq_failed_records.find({"status": "failed"})
 for record in dlq_records:
     try:
         # Retry processing
-        clean_record = transform(record["original_record"])
-        db.clean_collection.insert_one(clean_record)
+        transformed_record = transform(record["original_record"])
+        db.transformed_collection.insert_one(transformed_record)
         # Remove from DLQ
         db.dlq_failed_records.delete_one({"_id": record["_id"]})
     except Exception as e:
@@ -1170,9 +1209,11 @@ def transform_my_resource(raw_doc):
         ...
     }
 
-# Register in transformation map
+# Register in transformation map (uses ingestion name during transformation)
+# Collection mapping is centralized in config.py
+# After transformation, collections are renamed based on collection_mapping config
 transformations = {
-    "my_resources": ("clean_my_resources", transform_my_resource),
+    "my_resources": ("my_resources", transform_my_resource),  # Uses ingestion name, renamed at end if mapped
     ...
 }
 ```

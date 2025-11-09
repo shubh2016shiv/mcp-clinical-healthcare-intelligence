@@ -443,7 +443,7 @@ class DataQualityValidator:
 
         # Patient collection rules
         self.add_rule(
-            "clean_patients",
+            "patients",
             CompletenessRule(
                 name="patient_required_fields",
                 description="Patient records must have required demographic fields",
@@ -452,7 +452,7 @@ class DataQualityValidator:
         )
 
         self.add_rule(
-            "clean_patients",
+            "patients",
             DateConsistencyRule(
                 name="patient_date_consistency",
                 description="Patient dates must be reasonable",
@@ -462,7 +462,7 @@ class DataQualityValidator:
 
         # Condition collection rules
         self.add_rule(
-            "clean_conditions",
+            "conditions",
             CompletenessRule(
                 name="condition_required_fields",
                 description="Condition records must have essential fields",
@@ -471,18 +471,18 @@ class DataQualityValidator:
         )
 
         self.add_rule(
-            "clean_conditions",
+            "conditions",
             ReferentialIntegrityRule(
                 name="condition_patient_reference",
                 description="Condition must reference valid patient",
                 field_name="patient_id",
-                referenced_collection="clean_patients",
+                referenced_collection="patients",
             ),
         )
 
         # Observation collection rules
         self.add_rule(
-            "clean_observations",
+            "observations",
             CompletenessRule(
                 name="observation_required_fields",
                 description="Observation records must have essential fields",
@@ -491,18 +491,18 @@ class DataQualityValidator:
         )
 
         self.add_rule(
-            "clean_observations",
+            "observations",
             ReferentialIntegrityRule(
                 name="observation_patient_reference",
                 description="Observation must reference valid patient",
                 field_name="patient_id",
-                referenced_collection="clean_patients",
+                referenced_collection="patients",
             ),
         )
 
         # Medication collection rules
         self.add_rule(
-            "clean_medications",
+            "medications",
             CompletenessRule(
                 name="medication_required_fields",
                 description="Medication records must have essential fields",
@@ -511,18 +511,18 @@ class DataQualityValidator:
         )
 
         self.add_rule(
-            "clean_medications",
+            "medications",
             ReferentialIntegrityRule(
                 name="medication_patient_reference",
                 description="Medication must reference valid patient",
                 field_name="patient_id",
-                referenced_collection="clean_patients",
+                referenced_collection="patients",
             ),
         )
 
         # Format validation rules
         self.add_rule(
-            "clean_patients",
+            "patients",
             FormatRule(
                 name="patient_name_format",
                 description="Patient names should be reasonable length",
@@ -533,7 +533,7 @@ class DataQualityValidator:
         )
 
         self.add_rule(
-            "clean_patients",
+            "patients",
             FormatRule(
                 name="patient_gender_format",
                 description="Gender should be valid enum value",

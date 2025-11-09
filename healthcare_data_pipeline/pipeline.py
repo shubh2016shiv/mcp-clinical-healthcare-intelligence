@@ -361,10 +361,16 @@ def ingest_data(
     print_info(f"Data source: {fhir_dir}\n")
 
     try:
+        # Determine target database for ingestion based on keep_raw_fhir_data flag
+        if config.pipeline.keep_raw_fhir_data:
+            ingest_db_name = config.mongodb.raw_db_name  # fhir_raw_db
+        else:
+            ingest_db_name = config.mongodb.db_name  # fhir_db
+
         # Directly call ingest_fhir_data with all parameters
         stats = ingest_fhir_data(
             data_path=str(fhir_dir),
-            db_name=config.mongodb.db_name,
+            db_name=ingest_db_name,
             host=config.mongodb.host,
             port=config.mongodb.port,
             user=config.mongodb.user,
@@ -417,8 +423,20 @@ def ingest_drug_data() -> bool:
         return True
 
 
-def transform_data(gemini_api_key: str | None = None, use_gemini: bool = True) -> bool:
-    """Transform FHIR data to clean medical records."""
+def transform_data(
+    gemini_api_key: str | None = None,
+    use_gemini: bool = True,
+    source_db_name: str | None = None,
+    target_db_name: str | None = None,
+) -> bool:
+    """Transform FHIR data to clean medical records.
+
+    Args:
+        gemini_api_key: Google AI API key for Gemini
+        use_gemini: Whether to use Gemini enrichment
+        source_db_name: Source database name to read from
+        target_db_name: Target database name to write to
+    """
     print_header("TRANSFORMING TO CLEAN MEDICAL RECORDS")
 
     transform_script = Path(__file__).parent / "transform.py"
@@ -460,6 +478,12 @@ def transform_data(gemini_api_key: str | None = None, use_gemini: bool = True) -
                 print_info("[INFO] Running transformation without enrichment")
             else:
                 print_info("[INFO] Running transformation without enrichment (--no-gemini flag)")
+
+        # Add source and target database arguments
+        if source_db_name:
+            cmd.extend(["--source-db-name", source_db_name])
+        if target_db_name:
+            cmd.extend(["--target-db-name", target_db_name])
 
         print_info(f"Running transformation script: {transform_script}\n")
 
@@ -514,12 +538,12 @@ def verify_data(
             "medicationrequests",
         ]
 
-        clean_collections = [
-            "clean_patients",
-            "clean_encounters",
-            "clean_conditions",
-            "clean_observations",
-            "clean_medications",
+        transformed_collections = [
+            "patients",
+            "encounters",
+            "conditions",
+            "observations",
+            "medications",
         ]
 
         print_info("[INFO] Raw FHIR Collections:")
@@ -533,18 +557,18 @@ def verify_data(
 
         if check_clean:
             print()
-            print_info("[INFO] Clean Medical Record Collections:")
-            clean_total = 0
-            for collection_name in clean_collections:
+            print_info("[INFO] Transformed Medical Record Collections:")
+            transformed_total = 0
+            for collection_name in transformed_collections:
                 if collection_name in db.list_collection_names():
                     count = db[collection_name].count_documents({})
                     if count > 0:
                         print_success(f"  {collection_name}: {count:,} documents")
-                        clean_total += count
+                        transformed_total += count
 
-            if clean_total == 0:
+            if transformed_total == 0:
                 print_warning(
-                    "[WARNING] No clean collections found - transformation may have failed"
+                    "[WARNING] No transformed collections found - transformation may have failed"
                 )
 
         client.close()
@@ -641,29 +665,29 @@ def print_connection_details(
     print(f"  Database: {db_name}")
     print()
 
-    print(f"{Colors.BOLD}Clean Collections (Transformed Data):{Colors.ENDC}")
-    print("  • clean_patients - Patient demographics")
-    print("  • clean_conditions - Medical conditions/diagnoses")
-    print("  • clean_medications - Medication prescriptions")
-    print("  • clean_observations - Lab results & vital signs")
-    print("  • clean_allergies - Allergy information")
-    print("  • clean_immunizations - Vaccination records")
-    print("  • clean_procedures - Medical procedures")
-    print("  • clean_encounters - Healthcare visits")
-    print("  • clean_care_plans - Treatment plans")
+    print(f"{Colors.BOLD}Transformed Collections:{Colors.ENDC}")
+    print("  • patients - Patient demographics")
+    print("  • conditions - Medical conditions/diagnoses")
+    print("  • medications - Medication prescriptions")
+    print("  • observations - Lab results & vital signs")
+    print("  • allergies - Allergy information")
+    print("  • immunizations - Vaccination records")
+    print("  • procedures - Medical procedures")
+    print("  • encounters - Healthcare visits")
+    print("  • care_plans - Treatment plans")
     print()
 
-    print(f"{Colors.OKCYAN}{Colors.BOLD}Sample Queries (Clean Data):{Colors.ENDC}")
+    print(f"{Colors.OKCYAN}{Colors.BOLD}Sample Queries (Transformed Data):{Colors.ENDC}")
     print("  # Find all diabetic patients")
-    print("  db.clean_conditions.find({'condition_name': /Diabetes/i})")
+    print("  db.conditions.find({'condition_name': /Diabetes/i})")
     print()
     print("  # Get patient's complete medical record")
     print("  patient_id = 'PATIENT_ID'")
-    print("  db.clean_conditions.find({'patient_id': patient_id})")
-    print("  db.clean_medications.find({'patient_id': patient_id})")
+    print("  db.conditions.find({'patient_id': patient_id})")
+    print("  db.medications.find({'patient_id': patient_id})")
     print()
     print("  # Count patients by condition")
-    print("  db.clean_conditions.aggregate([")
+    print("  db.conditions.aggregate([")
     print("    {$group: {_id: '$condition_name', count: {$sum: 1}}},")
     print("    {$sort: {count: -1}},")
     print("    {$limit: 10}")
@@ -792,12 +816,23 @@ Examples:
     if args.no_gemini:
         config.gemini.enabled = False
 
+    # Determine source and target databases based on keep_raw_fhir_data flag
+    if config.pipeline.keep_raw_fhir_data:
+        source_db_name = config.mongodb.raw_db_name  # fhir_raw_db
+        target_db_name = config.mongodb.db_name  # fhir_db
+    else:
+        source_db_name = config.mongodb.db_name  # fhir_db
+        target_db_name = config.mongodb.db_name  # fhir_db
+
     # If only transforming, skip to transformation
     if args.only_transform:
         print_info("Running transformation only (skipping generation/ingestion)\n")
 
         if not transform_data(
-            config.gemini.api_key if config.gemini.enabled else None, config.gemini.enabled
+            config.gemini.api_key if config.gemini.enabled else None,
+            config.gemini.enabled,
+            source_db_name,
+            target_db_name,
         ):
             print_error("Transformation failed")
             sys.exit(1)
@@ -842,16 +877,38 @@ Examples:
     else:
         print_info("Skipping infrastructure startup\n")
 
-    # Drop existing database to start fresh
-    if not drop_database(
-        config.mongodb.host,
-        config.mongodb.port,
-        config.mongodb.user,
-        config.mongodb.password,
-        config.mongodb.db_name,
-    ):
-        print_error("Failed to drop existing database")
-        sys.exit(1)
+    # Drop existing database(s) to start fresh
+    if config.pipeline.keep_raw_fhir_data:
+        # Drop both raw and transformed databases
+        if not drop_database(
+            config.mongodb.host,
+            config.mongodb.port,
+            config.mongodb.user,
+            config.mongodb.password,
+            config.mongodb.raw_db_name,
+        ):
+            print_error("Failed to drop raw database")
+            sys.exit(1)
+        if not drop_database(
+            config.mongodb.host,
+            config.mongodb.port,
+            config.mongodb.user,
+            config.mongodb.password,
+            config.mongodb.db_name,
+        ):
+            print_error("Failed to drop transformed database")
+            sys.exit(1)
+    else:
+        # Drop only transformed database
+        if not drop_database(
+            config.mongodb.host,
+            config.mongodb.port,
+            config.mongodb.user,
+            config.mongodb.password,
+            config.mongodb.db_name,
+        ):
+            print_error("Failed to drop existing database")
+            sys.exit(1)
     print()
 
     # Generate Synthea data
@@ -880,7 +937,10 @@ Examples:
     # Transform to clean medical records
     if not args.skip_transform:
         if not transform_data(
-            config.gemini.api_key if config.gemini.enabled else None, config.gemini.enabled
+            config.gemini.api_key if config.gemini.enabled else None,
+            config.gemini.enabled,
+            source_db_name,
+            target_db_name,
         ):
             print_warning("Transformation failed or incomplete")
             print_info("Raw FHIR data is still available in original collections")
