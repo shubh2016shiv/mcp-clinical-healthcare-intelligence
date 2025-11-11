@@ -112,7 +112,8 @@ def execute_mongodb_query(
             }
 
         # STEP 2: Get secure connection to healthcare database
-        # Uses connection pooling for performance and health checks for reliability
+        # Uses the global singleton ConnectionManager, shared with BaseTool
+        # and connection pooling for performance and health checks for reliability
         manager = get_connection_manager()
         db = manager.get_database()
 
@@ -177,14 +178,14 @@ def execute_mongodb_query(
         # STEP 6: OBSERVABILITY - Log the query for verification before execution
         # This ensures users can verify that the correct intermediate query was generated
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"EXECUTING QUERY FOR VERIFICATION:\n"
             f"  Collection: {collection_name}\n"
             f"  Query Type: {query_type}\n"
             f"  Query Filter: {json.dumps(parsed_query, indent=2)}\n"
             f"  Projection: {json.dumps(projection_dict) if projection_dict else 'None'}\n"
             f"  Limit: {result_limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # STEP 7: Execute the healthcare query with performance monitoring

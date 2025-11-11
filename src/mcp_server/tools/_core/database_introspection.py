@@ -46,6 +46,7 @@ def get_database_collections() -> dict[str, Any]:
         >>> print(f"Available healthcare collections: {result['collections']}")
     """
     try:
+        # Uses the global singleton ConnectionManager, shared with BaseTool
         manager = get_connection_manager()
         db = manager.get_database()
 
@@ -127,6 +128,7 @@ def get_collection_schema(collection_name: str) -> dict[str, Any]:
         >>> # Output: ['id', 'code.coding', 'subject.reference', 'onsetDateTime', ...]
     """
     try:
+        # Uses the global singleton ConnectionManager, shared with BaseTool
         manager = get_connection_manager()
         db = manager.get_database()
         collection = db[collection_name]

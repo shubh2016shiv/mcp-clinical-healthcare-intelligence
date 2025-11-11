@@ -77,8 +77,7 @@ def validate_mongodb_query(query: str, query_type: str = "find") -> dict[str, An
                 "success": False,
                 "valid": False,
                 "errors": [
-                    f"Invalid query_type '{query_type}'. "
-                    f"Must be one of: {', '.join(valid_types)}"
+                    f"Invalid query_type '{query_type}'. Must be one of: {', '.join(valid_types)}"
                 ],
             }
 
@@ -109,14 +108,13 @@ def validate_mongodb_query(query: str, query_type: str = "find") -> dict[str, An
 
             if found_destructive:
                 logger.warning(
-                    f"Destructive operations detected in read-only mode: " f"{found_destructive}"
+                    f"Destructive operations detected in read-only mode: {found_destructive}"
                 )
                 return {
                     "success": False,
                     "valid": False,
                     "errors": [
-                        f"Operation not allowed in read-only mode: "
-                        f"{', '.join(found_destructive)}"
+                        f"Operation not allowed in read-only mode: {', '.join(found_destructive)}"
                     ],
                 }
 
