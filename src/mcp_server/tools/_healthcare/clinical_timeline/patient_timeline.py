@@ -8,17 +8,17 @@ import asyncio
 import logging
 from typing import Any
 
-from ...base_tool import BaseTool
-from ...database.async_executor import get_executor_pool
-from ...models import (
+from src.mcp_server.database.async_executor import get_executor_pool
+from src.mcp_server.security import get_security_manager
+from src.mcp_server.security.projection_manager import get_projection_manager
+from src.mcp_server.tools.base_tool import BaseTool
+from src.mcp_server.tools.models import (
     ClinicalEvent,
     ClinicalTimelineRequest,
     ClinicalTimelineResponse,
     CollectionNames,
 )
-from ...security import get_security_manager
-from ...security.projection_manager import get_projection_manager
-from ...utils import build_date_filter, handle_mongo_errors
+from src.mcp_server.tools.utils import build_date_filter, handle_mongo_errors
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class PatientTimelineTools(BaseTool):
 
         Args:
             request: Timeline request with patient ID (REQUIRED) and optional filters
-            security_context: Security context for access control and data minimization
+            security_context: Security context for access control and data minimization (field projection)
 
         Returns:
             Complete clinical timeline response containing all clinical events for patient
@@ -186,13 +186,13 @@ class PatientTimelineTools(BaseTool):
             return events
 
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"CLINICAL TIMELINE QUERY:\n"
             f"  Patient ID: {request.patient_id}\n"
             f"  Event Types: {list(event_sources.keys())}\n"
             f"  Date Range: {request.start_date} to {request.end_date}\n"
             f"  Limit: {request.limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Create tasks for all collections (parallel execution)

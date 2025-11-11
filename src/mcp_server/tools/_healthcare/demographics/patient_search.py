@@ -7,12 +7,16 @@ based on demographic information and identifiers.
 import asyncio
 import logging
 
-from ...base_tool import BaseTool
-from ...database.async_executor import get_executor_pool
-from ...models import CollectionNames, PatientSummary, SearchPatientsRequest
-from ...security import get_security_manager
-from ...security.projection_manager import get_projection_manager
-from ...utils import (
+from src.mcp_server.database.async_executor import get_executor_pool
+from src.mcp_server.security import get_security_manager
+from src.mcp_server.security.projection_manager import get_projection_manager
+from src.mcp_server.tools.base_tool import BaseTool
+from src.mcp_server.tools.models import (
+    CollectionNames,
+    PatientSummary,
+    SearchPatientsRequest,
+)
+from src.mcp_server.tools.utils import (
     build_compound_filter,
     build_date_filter,
     build_text_filter,
@@ -52,7 +56,7 @@ class PatientSearchTools(BaseTool):
 
         Args:
             request: Search criteria including names, demographics, location
-            security_context: Security context for access control and data minimization
+            security_context: Security context for access control and data minimization (field projection)
 
         Returns:
             List of matching patient summaries
@@ -96,11 +100,11 @@ class PatientSearchTools(BaseTool):
         query_filter = build_compound_filter(*filters)
 
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"PATIENT SEARCH QUERY:\n"
             f"  Filter: {query_filter}\n"
             f"  Limit: {request.limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Execute blocking query in thread pool
