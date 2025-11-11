@@ -18,6 +18,7 @@ Usage:
 from .clinical_data import AllergyTools, CarePlansTools, ConditionsTools, ImmunizationsTools, ObservationsTools, ProceduresTools
 from .clinical_timeline import PatientTimelineTools
 from .demographics import PatientSearchTools
+from .encounters import EncountersTools
 from .financial import AnalyticsTools as FinancialAnalyticsTools
 from .medications import DrugTools, MedicationTools
 
@@ -30,6 +31,7 @@ __all__ = [
     "ImmunizationsTools",
     "ObservationsTools",
     "ProceduresTools",
+    "EncountersTools",
     "FinancialAnalyticsTools",
     "MedicationTools",
     "DrugTools",
