@@ -1,0 +1,10 @@
+{
+  "description": "Analyze health conditions across individual patients or populations.",
+  "usage": "Can return individual condition records or aggregated statistics grouped by condition name, patient demographics, or time periods. Use this for clinical research, population health analysis, or understanding disease patterns.",
+  "examples": [
+    "Find all active diabetes cases",
+    "Analyze chronic sinusitis prevalence by demographics",
+    "Show condition trends over time",
+    "Group conditions by patient race and ethnicity"
+  ]
+}

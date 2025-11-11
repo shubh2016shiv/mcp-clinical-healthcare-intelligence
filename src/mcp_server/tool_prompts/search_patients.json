@@ -1,0 +1,12 @@
+{
+  "description": "Search for patients using flexible criteria.",
+  "usage": "Use this tool as the starting point when you need to identify patients before querying their clinical data. Supports partial name matching and multiple demographic filters.",
+  "examples": [
+    "Find all patients named 'John' in Texas",
+    "Locate patient with ID 'abc-123'",
+    "Search for female patients in Houston born after 1990"
+  ]
+}
+
+
+

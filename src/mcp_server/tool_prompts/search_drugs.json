@@ -1,0 +1,10 @@
+{
+  "description": "Search for drugs in the RxNorm database with flexible criteria.",
+  "usage": "Search drugs by name, ATC classification levels, or RxCUI. All text searches are case-insensitive partial matches. Use this for drug information lookup, therapeutic class analysis, or medication research.",
+  "examples": [
+    "Find all drugs containing 'aspirin'",
+    "Search for drugs in 'Antithrombotic agents' class",
+    "Look up drug by RxCUI '5640'",
+    "Find drugs in 'Platelet aggregation inhibitors' class"
+  ]
+}

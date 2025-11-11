@@ -1,0 +1,10 @@
+{
+  "description": "Analyze financial data from insurance claims and explanations of benefits.",
+  "usage": "Calculate totals, averages, and distributions. Can group by patient, insurance provider, facility, or time period. Use this for billing analysis, cost assessment, or understanding healthcare utilization patterns.",
+  "examples": [
+    "Calculate total claims for a patient",
+    "Compare costs across insurance providers",
+    "Analyze facility billing patterns",
+    "Show monthly claim trends for 2024"
+  ]
+}

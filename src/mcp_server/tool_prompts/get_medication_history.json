@@ -1,0 +1,10 @@
+{
+  "description": "Retrieve medication history for patients with optional drug classification enrichment.",
+  "usage": "Can filter by medication name, drug class, status, or prescription date. When enriched, includes therapeutic class and drug category information. Use this to review patient medications, check drug classes, or analyze prescribing patterns.",
+  "examples": [
+    "List all active medications for a patient",
+    "Find patients on diabetes medications",
+    "Show medications prescribed in the last 6 months",
+    "Get medications with their therapeutic classifications"
+  ]
+}

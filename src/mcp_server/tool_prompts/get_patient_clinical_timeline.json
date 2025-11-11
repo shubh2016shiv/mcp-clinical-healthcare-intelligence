@@ -1,0 +1,9 @@
+{
+  "description": "Retrieve a comprehensive chronological timeline of clinical events for a patient.",
+  "usage": "This tool provides a complete clinical history including encounters, conditions, medications, procedures, immunizations, and observations. Use this when you need a complete patient history or want to understand the sequence of clinical events.",
+  "examples": [
+    "Show all clinical events for patient in 2024",
+    "Get patient's encounter and condition history",
+    "Review patient's medical timeline for the past 5 years"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "description": "Analyze drug classifications and their distributions across therapeutic categories.",
+  "usage": "Group drugs by therapeutic class, drug class, or drug subclass to understand the distribution of medications across pharmacological categories. Includes counts and example drugs for each classification.",
+  "examples": [
+    "Show distribution of drugs by therapeutic class",
+    "Analyze pharmacological subgroups",
+    "Find most common drug subclasses"
+  ]
+}
