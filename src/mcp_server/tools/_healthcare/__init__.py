@@ -4,6 +4,7 @@ This package contains all healthcare business logic tools organized by
 operational categories: demographics, clinical data, medications, financial, etc.
 
 Usage:
+    from src.mcp_server.tools._healthcare.clinical_data import AllergyTools
     from src.mcp_server.tools._healthcare.demographics import PatientSearchTools
     from src.mcp_server.tools._healthcare.clinical_timeline import PatientTimelineTools
     from src.mcp_server.tools._healthcare.clinical_data import AnalyticsTools
@@ -14,7 +15,7 @@ Usage:
 """
 
 # Import all tool classes for convenience
-from .clinical_data import AnalyticsTools as ConditionAnalyticsTools
+from .clinical_data import AllergyTools, AnalyticsTools as ConditionAnalyticsTools, CarePlansTools
 from .clinical_timeline import PatientTimelineTools
 from .demographics import PatientSearchTools
 from .financial import AnalyticsTools as FinancialAnalyticsTools
@@ -24,6 +25,8 @@ __all__ = [
     "PatientSearchTools",
     "PatientTimelineTools",
     "ConditionAnalyticsTools",
+    "AllergyTools",
+    "CarePlansTools",
     "FinancialAnalyticsTools",
     "MedicationTools",
     "DrugTools",
