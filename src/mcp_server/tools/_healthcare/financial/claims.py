@@ -72,7 +72,7 @@ class ClaimsTools:
 
         # OBSERVABILITY: Log the query attempt for verification
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"CLAIMS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -82,7 +82,7 @@ class ClaimsTools:
             f"  Billable Date Range: {billable_start_date} to {billable_end_date}\n"
             f"  Amount Range: {min_amount} to {max_amount}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -191,7 +191,7 @@ class ClaimsTools:
 
         # OBSERVABILITY: Log the claim details query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"CLAIM DETAILS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Claim ID: {claim_id}\n"
@@ -199,7 +199,7 @@ class ClaimsTools:
             f"  Include Items: {include_items}\n"
             f"  Include Diagnoses: {include_diagnoses}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -249,7 +249,7 @@ class ClaimsTools:
 
         # OBSERVABILITY: Log the insurance utilization analysis attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"INSURANCE UTILIZATION ANALYSIS ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Insurance Provider: {insurance_provider}\n"
@@ -257,7 +257,7 @@ class ClaimsTools:
             f"  Date Range: {billable_start_date} to {billable_end_date}\n"
             f"  Min Claims per Period: {min_claims_per_period}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -314,7 +314,7 @@ class ClaimsTools:
 
         # OBSERVABILITY: Log the claim totals calculation attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"CLAIM TOTALS CALCULATION ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -324,7 +324,7 @@ class ClaimsTools:
             f"  Date Range: {billable_start_date} to {billable_end_date}\n"
             f"  Include Average: {include_average}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {

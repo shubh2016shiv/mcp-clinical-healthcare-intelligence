@@ -74,7 +74,7 @@ class ObservationsTools:
 
         # OBSERVABILITY: Log the query attempt for verification
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"OBSERVATIONS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -85,7 +85,7 @@ class ObservationsTools:
             f"  Value Range: {value_min} to {value_max}\n"
             f"  Unit: {unit}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -198,7 +198,7 @@ class ObservationsTools:
 
         # OBSERVABILITY: Log the vital signs history query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"VITAL SIGNS HISTORY QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -206,7 +206,7 @@ class ObservationsTools:
             f"  Date Range: {test_date_start} to {test_date_end}\n"
             f"  Include Trends: {include_trends}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -269,7 +269,7 @@ class ObservationsTools:
 
         # OBSERVABILITY: Log the lab results query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"LAB RESULTS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -278,7 +278,7 @@ class ObservationsTools:
             f"  Date Range: {test_date_start} to {test_date_end}\n"
             f"  Abnormal Only: {abnormal_only}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -344,7 +344,7 @@ class ObservationsTools:
 
         # OBSERVABILITY: Log the measurement trends analysis attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"MEASUREMENT TRENDS ANALYSIS ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -354,7 +354,7 @@ class ObservationsTools:
             f"  Date Range: {test_date_start} to {test_date_end}\n"
             f"  Calculate Statistics: {calculate_statistics}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {

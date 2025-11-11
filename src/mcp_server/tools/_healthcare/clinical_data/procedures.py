@@ -70,7 +70,7 @@ class ProceduresTools:
 
         # OBSERVABILITY: Log the query attempt for verification
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"PROCEDURES QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -80,7 +80,7 @@ class ProceduresTools:
             f"  Location: {location}\n"
             f"  Category: {procedure_category}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -191,7 +191,7 @@ class ProceduresTools:
 
         # OBSERVABILITY: Log the procedure history query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"PROCEDURE HISTORY QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -200,7 +200,7 @@ class ProceduresTools:
             f"  Include Outcomes: {include_outcomes}\n"
             f"  Chronological Order: {chronological_order}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -262,7 +262,7 @@ class ProceduresTools:
 
         # OBSERVABILITY: Log the procedure outcomes analysis attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"PROCEDURE OUTCOMES ANALYSIS ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -271,7 +271,7 @@ class ProceduresTools:
             f"  Time Period: {time_period}\n"
             f"  Outcome Metrics: {outcome_metrics}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -324,7 +324,7 @@ class ProceduresTools:
 
         # OBSERVABILITY: Log the procedure statistics query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"PROCEDURE STATISTICS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Category: {procedure_category}\n"
@@ -333,7 +333,7 @@ class ProceduresTools:
             f"  Location: {location}\n"
             f"  Include Demographics: {include_demographics}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {

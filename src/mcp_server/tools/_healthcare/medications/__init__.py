@@ -5,7 +5,7 @@ drug reference data, and drug classification analysis.
 """
 
 from .drug_analysis import DrugAnalysisTools
-from .drug_reference import DrugTools
+from .drug_analysis import DrugAnalysisTools as DrugTools  # Alias for backward compatibility
 from .patient_medications import MedicationTools
 
 __all__ = ["MedicationTools", "DrugTools", "DrugAnalysisTools"]

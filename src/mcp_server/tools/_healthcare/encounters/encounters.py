@@ -73,7 +73,7 @@ class EncountersTools:
 
         # OBSERVABILITY: Log the query attempt for verification
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"ENCOUNTERS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -84,7 +84,7 @@ class EncountersTools:
             f"  Provider: {provider}\n"
             f"  Visit Reason: {visit_reason}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -196,7 +196,7 @@ class EncountersTools:
 
         # OBSERVABILITY: Log the encounter history query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"ENCOUNTER HISTORY QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -205,7 +205,7 @@ class EncountersTools:
             f"  Chronological Order: {chronological_order}\n"
             f"  Include Visit Details: {include_visit_details}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -269,7 +269,7 @@ class EncountersTools:
 
         # OBSERVABILITY: Log the visit reasons analysis attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"VISIT REASONS ANALYSIS ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -278,7 +278,7 @@ class EncountersTools:
             f"  Date Range: {start_date} to {end_date}\n"
             f"  Min Frequency: {min_frequency}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -341,7 +341,7 @@ class EncountersTools:
 
         # OBSERVABILITY: Log the provider encounters query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"PROVIDER ENCOUNTERS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Provider: {provider}\n"
@@ -350,7 +350,7 @@ class EncountersTools:
             f"  Status: {status}\n"
             f"  Date Range: {start_date} to {end_date}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {

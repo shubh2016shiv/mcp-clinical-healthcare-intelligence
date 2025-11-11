@@ -68,7 +68,7 @@ class ImmunizationsTools:
 
         # OBSERVABILITY: Log the query attempt for verification
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"IMMUNIZATIONS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -77,7 +77,7 @@ class ImmunizationsTools:
             f"  Administration Date Range: {administration_date_start} to {administration_date_end}\n"
             f"  Location: {location}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -181,14 +181,14 @@ class ImmunizationsTools:
 
         # OBSERVABILITY: Log the vaccine history query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"VACCINE HISTORY QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
             f"  Vaccine Types: {vaccine_types}\n"
             f"  Include Due Dates: {include_due_dates}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -245,7 +245,7 @@ class ImmunizationsTools:
 
         # OBSERVABILITY: Log the vaccination status check attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"VACCINATION STATUS CHECK ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -253,7 +253,7 @@ class ImmunizationsTools:
             f"  Age in Years: {age_in_years}\n"
             f"  Check Completeness: {check_completeness}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {

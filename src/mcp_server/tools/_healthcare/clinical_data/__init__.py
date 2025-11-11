@@ -6,9 +6,18 @@ including conditions, observations, procedures, immunizations, allergies, and ca
 
 from .allergies import AllergyTools
 from .care_plans import CarePlansTools
+from .condition_analytics import ConditionAnalyticsTools
 from .conditions import ConditionsTools
 from .immunizations import ImmunizationsTools
 from .observations import ObservationsTools
 from .procedures import ProceduresTools
 
-__all__ = ["ConditionsTools", "AllergyTools", "CarePlansTools", "ImmunizationsTools", "ObservationsTools", "ProceduresTools"]
+__all__ = [
+    "ConditionsTools",
+    "ConditionAnalyticsTools",
+    "AllergyTools",
+    "CarePlansTools",
+    "ImmunizationsTools",
+    "ObservationsTools",
+    "ProceduresTools",
+]

@@ -72,7 +72,7 @@ class ConditionsTools:
 
         # OBSERVABILITY: Log the query attempt for verification
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"CONDITIONS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -82,7 +82,7 @@ class ConditionsTools:
             f"  Onset Date Range: {onset_date_start} to {onset_date_end}\n"
             f"  Recorded Date Range: {recorded_date_start} to {recorded_date_end}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -187,14 +187,14 @@ class ConditionsTools:
 
         # OBSERVABILITY: Log the condition details query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"CONDITION DETAILS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Condition ID: {condition_id}\n"
             f"  Patient ID: {patient_id}\n"
             f"  Include Similar: {include_similar}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -243,7 +243,7 @@ class ConditionsTools:
 
         # OBSERVABILITY: Log the prevalence analysis query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"CONDITION PREVALENCE ANALYSIS ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Condition Name: {condition_name}\n"
@@ -252,7 +252,7 @@ class ConditionsTools:
             f"  Geographic Filter: {geographic_filter}\n"
             f"  Age Group Filter: {age_group_filter}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {

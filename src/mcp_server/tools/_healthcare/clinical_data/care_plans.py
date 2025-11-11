@@ -73,7 +73,7 @@ class CarePlansTools:
 
         # OBSERVABILITY: Log the query attempt for verification
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"CARE PLANS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -83,7 +83,7 @@ class CarePlansTools:
             f"  Intent: {intent}\n"
             f"  Period: {period_start} to {period_end}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -185,7 +185,7 @@ class CarePlansTools:
 
         # OBSERVABILITY: Log the goals query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"CARE PLAN GOALS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -193,7 +193,7 @@ class CarePlansTools:
             f"  Goal Description: {goal_description}\n"
             f"  Goal Status: {goal_status}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {

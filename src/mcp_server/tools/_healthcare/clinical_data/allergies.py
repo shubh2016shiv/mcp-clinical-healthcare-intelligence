@@ -73,7 +73,7 @@ class AllergyTools:
 
         # OBSERVABILITY: Log the query attempt for verification
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"ALLERGIES QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -83,7 +83,7 @@ class AllergyTools:
             f"  Status: {status}\n"
             f"  Date Range: {recorded_date_start} to {recorded_date_end}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {

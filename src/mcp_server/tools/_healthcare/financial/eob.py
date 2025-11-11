@@ -74,7 +74,7 @@ class EOBTools:
 
         # OBSERVABILITY: Log the query attempt for verification
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"EOB QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -85,7 +85,7 @@ class EOBTools:
             f"  Outcome: {outcome}\n"
             f"  Submitted Amount Range: {min_submitted_amount} to {max_submitted_amount}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -197,7 +197,7 @@ class EOBTools:
 
         # OBSERVABILITY: Log the EOB details query attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"EOB DETAILS QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  EOB ID: {eob_id}\n"
@@ -206,7 +206,7 @@ class EOBTools:
             f"  Include Items: {include_items}\n"
             f"  Include Adjudications: {include_adjudications}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -271,7 +271,7 @@ class EOBTools:
 
         # OBSERVABILITY: Log the payment patterns analysis attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"PAYMENT PATTERNS ANALYSIS ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -280,7 +280,7 @@ class EOBTools:
             f"  Date Range: {billable_start_date} to {billable_end_date}\n"
             f"  Submitted Amount Range: {min_submitted_amount} to {max_submitted_amount}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {
@@ -339,7 +339,7 @@ class EOBTools:
 
         # OBSERVABILITY: Log the EOB totals calculation attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"EOB TOTALS CALCULATION ATTEMPTED (COLLECTION NOT FOUND):\n"
             f"  Collection: {collection_name}\n"
             f"  Patient ID: {patient_id}\n"
@@ -350,7 +350,7 @@ class EOBTools:
             f"  Include Adjudicated Totals: {include_adjudicated_totals}\n"
             f"  Include Submitted Totals: {include_submitted_totals}\n"
             f"  Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         return {

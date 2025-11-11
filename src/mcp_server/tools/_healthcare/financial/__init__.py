@@ -6,6 +6,9 @@ including claims, explanations of benefits, and billing information.
 
 from .claims import ClaimsTools
 from .eob import EOBTools
-from .financial_analytics import AnalyticsTools
+from .financial_analytics import FinancialAnalyticsTools
 
-__all__ = ["ClaimsTools", "EOBTools", "AnalyticsTools"]
+# Backward compatibility alias
+AnalyticsTools = FinancialAnalyticsTools
+
+__all__ = ["ClaimsTools", "EOBTools", "FinancialAnalyticsTools", "AnalyticsTools"]
