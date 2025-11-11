@@ -9,7 +9,7 @@ drug reference database, not patient medication records.
 
 # For Phase 1, we're importing from the original location
 # In Phase 2, the actual implementation will be moved here
-from ...drug_tools import DrugTools
+from .drug_analysis import DrugAnalysisTools as DrugTools
 
 # Re-export for discovery
 __all__ = ["DrugTools"]

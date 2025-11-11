@@ -35,7 +35,7 @@ from .tool_prompts import get_system_instructions, get_tool_prompt
 # Import from new modular structure (for compatibility and observability)
 # These provide the enhanced query logging and validation features
 from .tools.analytics_tools import AnalyticsTools
-from .tools.drug_tools import DrugTools
+from .tools._healthcare.medications import DrugAnalysisTools
 from .tools.medication_tools import MedicationTools
 from .tools.models import (
     ClinicalTimelineRequest,
@@ -61,6 +61,7 @@ def with_centralized_prompt(tool_name: str):
         return func
 
     return decorator
+
 
 # Configure logging
 logging.basicConfig(
