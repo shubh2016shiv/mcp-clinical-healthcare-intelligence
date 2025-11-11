@@ -7,5 +7,6 @@ including conditions, observations, procedures, immunizations, allergies, and ca
 from .allergies import AllergyTools
 from .care_plans import CarePlansTools
 from .conditions import ConditionsTools
+from .immunizations import ImmunizationsTools
 
-__all__ = ["ConditionsTools", "AllergyTools", "CarePlansTools"]
+__all__ = ["ConditionsTools", "AllergyTools", "CarePlansTools", "ImmunizationsTools"]
