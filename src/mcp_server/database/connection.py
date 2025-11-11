@@ -30,15 +30,14 @@ import functools
 import logging
 import threading
 import time
-from typing import Any, Callable, Coroutine, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, Optional, TypeVar
 
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.errors import (
     ConnectionFailure,
-    ConnectionPoolClosed,
     NetworkTimeout,
-    OperationFailure,
     ServerSelectionTimeoutError,
 )
 
@@ -67,9 +66,9 @@ class QueryExecutionError(Exception):
     def __init__(
         self,
         message: str,
-        operation: Optional[str] = None,
-        collection: Optional[str] = None,
-        cause: Optional[Exception] = None,
+        operation: str | None = None,
+        collection: str | None = None,
+        cause: Exception | None = None,
     ) -> None:
         """Initialize QueryExecutionError.
 
@@ -141,8 +140,8 @@ class ConnectionManager:
         if self._initialized:
             return
 
-        self._client: Optional[MongoClient] = None
-        self._database: Optional[Database] = None
+        self._client: MongoClient | None = None
+        self._database: Database | None = None
         self._connected: bool = False
         self._last_health_check: float = 0.0
         self._lock = threading.Lock()
@@ -177,9 +176,12 @@ class ConnectionManager:
 
             for attempt in range(self.MAX_RETRIES):
                 try:
+                    # Use connection string which includes credentials if provided
+                    connection_uri = settings.mongodb_connection_string
+
                     # Create client with configured pool settings
                     self._client = MongoClient(
-                        settings.mongodb_connection_string,
+                        connection_uri,
                         serverSelectionTimeoutMS=settings.mongodb_timeout * 1000,
                         connectTimeoutMS=settings.mongodb_timeout * 1000,
                         minPoolSize=settings.mongodb_min_pool_size,
@@ -192,9 +194,16 @@ class ConnectionManager:
                     self._connected = True
                     self._last_health_check = time.time()
 
+                    # Log connection info (mask credentials in logs)
+                    log_uri = connection_uri
+                    if "@" in log_uri:
+                        # Mask credentials in log output
+                        parts = log_uri.split("@")
+                        log_uri = "mongodb://***:***@" + parts[1]
+
                     logger.info(
                         f"Successfully connected to MongoDB at "
-                        f"{settings.mongodb_uri} (database: {settings.mongodb_database})"
+                        f"{log_uri} (database: {settings.mongodb_database})"
                     )
                     return True
 
@@ -203,7 +212,7 @@ class ConnectionManager:
                     if attempt_num < self.MAX_RETRIES:
                         # Calculate exponential backoff delay
                         delay = min(
-                            self.RETRY_DELAY * (2 ** attempt),
+                            self.RETRY_DELAY * (2**attempt),
                             self.MAX_RETRY_DELAY,
                         )
                         logger.warning(
@@ -340,7 +349,7 @@ class ConnectionManager:
 
 
 # Global singleton instance
-_connection_manager: Optional[ConnectionManager] = None
+_connection_manager: ConnectionManager | None = None
 
 
 def get_connection_manager() -> ConnectionManager:
@@ -431,14 +440,6 @@ def ensure_connected(func: F) -> F:
             # Execute the decorated function
             logger.debug(f"Executing {func.__name__} with active MongoDB connection")
             return func(*args, **kwargs)
-
-        except ConnectionPoolClosed as e:
-            logger.error(f"Connection pool was closed during {func.__name__}: {e}")
-            raise QueryExecutionError(
-                f"MongoDB connection pool closed during {func.__name__}",
-                operation=func.__name__,
-                cause=e,
-            ) from e
 
         except QueryExecutionError:
             # Re-raise our custom exceptions
