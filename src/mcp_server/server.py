@@ -34,21 +34,27 @@ from .tool_prompts import get_system_instructions, get_tool_prompt
 
 # Import from new modular structure (for compatibility and observability)
 # These provide the enhanced query logging and validation features
-from .tools.analytics_tools import AnalyticsTools
-from .tools._healthcare.medications import DrugAnalysisTools
+from .tools._healthcare.analytics_tools import AnalyticsTools
+from .tools._healthcare.medications import DrugAnalysisTools as DrugTools
 from .tools._healthcare.medications import MedicationTools
+from .tools._healthcare.patient_tools import PatientTools
 from .tools.models import (
     ClinicalTimelineRequest,
+    ClinicalTimelineResponse,
     ConditionAnalysisRequest,
+    ConditionAnalysisResponse,
     DrugClassAnalysisRequest,
+    DrugClassAnalysisResponse,
+    DrugSearchResponse,
     ErrorResponse,
     FinancialSummaryRequest,
+    FinancialSummaryResponse,
     MedicationHistoryRequest,
+    MedicationHistoryResponse,
     PatientSummary,
     SearchDrugsRequest,
     SearchPatientsRequest,
 )
-from .tools.patient_tools import PatientTools
 
 
 def with_centralized_prompt(tool_name: str):
@@ -201,7 +207,9 @@ def create_server() -> FastMCP:
 
             security_context = get_security_context()
 
-            result = await patient_tools.get_patient_clinical_timeline(request, security_context)
+            result: ClinicalTimelineResponse = await patient_tools.get_patient_clinical_timeline(
+                request, security_context
+            )
             return result.model_dump()
         except Exception as e:
             logger.error(f"Error in get_patient_clinical_timeline: {e}")
@@ -240,7 +248,9 @@ def create_server() -> FastMCP:
 
             security_context = get_security_context()
 
-            result = await analytics_tools.analyze_conditions(request, security_context)
+            result: ConditionAnalysisResponse = await analytics_tools.analyze_conditions(
+                request, security_context
+            )
             return result.model_dump()
         except Exception as e:
             logger.error(f"Error in analyze_conditions: {e}")
@@ -275,7 +285,9 @@ def create_server() -> FastMCP:
 
             security_context = get_security_context()
 
-            result = await analytics_tools.get_financial_summary(request, security_context)
+            result: FinancialSummaryResponse = await analytics_tools.get_financial_summary(
+                request, security_context
+            )
             return result.model_dump()
         except Exception as e:
             logger.error(f"Error in get_financial_summary: {e}")
@@ -316,7 +328,9 @@ def create_server() -> FastMCP:
 
             security_context = get_security_context()
 
-            result = await medication_tools.get_medication_history(request, security_context)
+            result: MedicationHistoryResponse = await medication_tools.get_medication_history(
+                request, security_context
+            )
             return result.model_dump()
         except Exception as e:
             logger.error(f"Error in get_medication_history: {e}")
@@ -351,7 +365,7 @@ def create_server() -> FastMCP:
                 limit=limit,
             )
             # Drug information is public - no security context needed
-            result = await drug_tools.search_drugs(request)
+            result: DrugSearchResponse = await drug_tools.search_drugs(request)
             return result.model_dump()
         except Exception as e:
             logger.error(f"Error in search_drugs: {e}")
@@ -368,7 +382,7 @@ def create_server() -> FastMCP:
         try:
             request = DrugClassAnalysisRequest(group_by=group_by, min_count=min_count, limit=limit)
             # Drug information is public - no security context needed
-            result = await drug_tools.analyze_drug_classes(request)
+            result: DrugClassAnalysisResponse = await drug_tools.analyze_drug_classes(request)
             return result.model_dump()
         except Exception as e:
             logger.error(f"Error in analyze_drug_classes: {e}")

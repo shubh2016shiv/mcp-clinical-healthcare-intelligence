@@ -193,7 +193,7 @@ class InputValidator:
 
         if limit > self.config.max_query_results:
             self.logger.warning(
-                f"Limit {limit} exceeds max {self.config.max_query_results}, " "capping to maximum"
+                f"Limit {limit} exceeds max {self.config.max_query_results}, capping to maximum"
             )
             return self.config.max_query_results
 
