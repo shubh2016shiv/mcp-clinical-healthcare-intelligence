@@ -9,5 +9,6 @@ from .care_plans import CarePlansTools
 from .conditions import ConditionsTools
 from .immunizations import ImmunizationsTools
 from .observations import ObservationsTools
+from .procedures import ProceduresTools
 
-__all__ = ["ConditionsTools", "AllergyTools", "CarePlansTools", "ImmunizationsTools", "ObservationsTools"]
+__all__ = ["ConditionsTools", "AllergyTools", "CarePlansTools", "ImmunizationsTools", "ObservationsTools", "ProceduresTools"]
