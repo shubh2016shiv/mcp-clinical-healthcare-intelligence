@@ -10,7 +10,7 @@ import logging
 from src.mcp_server.database.connection import get_connection_manager
 from src.mcp_server.tools.patient_tools import PatientTools
 from src.mcp_server.tools.analytics_tools import AnalyticsTools
-from src.mcp_server.tools.medication_tools import MedicationTools
+from src.mcp_server.tools._healthcare.medications import MedicationTools
 from src.mcp_server.tools._healthcare.medications import DrugAnalysisTools as DrugTools
 from src.mcp_server.tools.models import (
     SearchPatientsRequest,

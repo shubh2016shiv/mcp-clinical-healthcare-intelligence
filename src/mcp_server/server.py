@@ -36,7 +36,7 @@ from .tool_prompts import get_system_instructions, get_tool_prompt
 # These provide the enhanced query logging and validation features
 from .tools.analytics_tools import AnalyticsTools
 from .tools._healthcare.medications import DrugAnalysisTools
-from .tools.medication_tools import MedicationTools
+from .tools._healthcare.medications import MedicationTools
 from .tools.models import (
     ClinicalTimelineRequest,
     ConditionAnalysisRequest,
