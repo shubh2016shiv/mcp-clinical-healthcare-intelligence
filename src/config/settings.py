@@ -17,10 +17,13 @@ Example:
 
 import logging
 from enum import Enum
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from src.mcp_server.security.config import SecurityConfig
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +103,23 @@ class Settings(BaseSettings):
         description=(
             "MongoDB connection URI with protocol, host, port, and authentication. "
             "Format: mongodb://[username:password@]host[:port][/database][?options]"
+            "If mongodb_user and mongodb_password are provided, they will be used to construct the URI."
         ),
+    )
+
+    mongodb_user: str | None = Field(
+        default=None,
+        description="MongoDB username for authentication. If provided, will be used to construct mongodb_uri.",
+    )
+
+    mongodb_password: str | None = Field(
+        default=None,
+        description="MongoDB password for authentication. If provided, will be used to construct mongodb_uri.",
+    )
+
+    mongodb_auth_source: str = Field(
+        default="admin",
+        description="MongoDB authentication database (authSource). Defaults to 'admin'.",
     )
 
     mongodb_database: str = Field(
@@ -136,12 +155,12 @@ class Settings(BaseSettings):
         description="Primary LLM provider for query analysis and complexity scoring",
     )
 
-    openai_api_key: Optional[str] = Field(
+    openai_api_key: str | None = Field(
         default=None,
         description="API key for OpenAI services. Required if llm_provider is 'openai'",
     )
 
-    anthropic_api_key: Optional[str] = Field(
+    anthropic_api_key: str | None = Field(
         default=None,
         description="API key for Anthropic Claude services. Required if llm_provider is 'anthropic'",
     )
@@ -246,6 +265,139 @@ class Settings(BaseSettings):
     )
 
     # ========================================================================
+    # Security Configuration
+    # ========================================================================
+
+    security_enabled: bool = Field(
+        default=True,
+        description="Enable the security layer for PHI protection and HIPAA compliance",
+    )
+
+    security_api_key: str | None = Field(
+        default=None,
+        description="API key for authentication (for development/single-user mode)",
+    )
+
+    security_default_role: str = Field(
+        default="read_only",
+        description="Default user role when security context not provided",
+    )
+
+    security_audit_log_path: str = Field(
+        default="audit.log",
+        description="Path for HIPAA-compliant audit logging",
+    )
+
+    security_session_timeout: int = Field(
+        default=30,
+        description="Session timeout in minutes",
+        ge=5,
+        le=480,
+    )
+
+    security_rate_limit: int = Field(
+        default=60,
+        description="Rate limit: requests per minute per client",
+        ge=10,
+        le=1000,
+    )
+
+    security_max_query_results: int = Field(
+        default=100,
+        description="Maximum query results to prevent bulk PHI extraction",
+        ge=1,
+        le=500,
+    )
+
+    security_audit_retention_days: int = Field(
+        default=2555,  # 7 years
+        description="Audit log retention in days (HIPAA requirement: 7 years)",
+        ge=365,
+        le=3650,
+    )
+
+    # ========================================================================
+    # Redis Cache Configuration
+    # ========================================================================
+
+    redis_enabled: bool = Field(
+        default=True,
+        description="Enable Redis caching layer for performance optimization",
+    )
+
+    redis_host: str = Field(
+        default="localhost",
+        description="Redis server host address",
+    )
+
+    redis_port: int = Field(
+        default=6379,
+        description="Redis server port",
+        ge=1024,
+        le=65535,
+    )
+
+    redis_password: str | None = Field(
+        default=None,
+        description="Redis server password (if authentication required)",
+    )
+
+    redis_ssl: bool = Field(
+        default=False,
+        description="Use SSL/TLS for Redis connection",
+    )
+
+    redis_max_connections: int = Field(
+        default=20,
+        description="Maximum connections in Redis connection pool",
+        ge=1,
+        le=100,
+    )
+
+    redis_socket_timeout: int = Field(
+        default=5,
+        description="Redis socket timeout in seconds",
+        ge=1,
+        le=60,
+    )
+
+    # Cache TTL Settings (in seconds)
+    redis_ttl_rbac_decisions: int = Field(
+        default=3600,
+        description="TTL for RBAC decision cache (seconds, 1 hour)",
+        ge=60,
+        le=86400,
+    )
+
+    redis_ttl_tool_prompts: int = Field(
+        default=86400,
+        description="TTL for tool prompt cache (seconds, 24 hours)",
+        ge=3600,
+        le=604800,
+    )
+
+    redis_ttl_field_schemas: int = Field(
+        default=3600,
+        description="TTL for field schema cache (seconds, 1 hour)",
+        ge=60,
+        le=86400,
+    )
+
+    redis_ttl_session_data: int = Field(
+        default=1800,
+        description="TTL for session data cache (seconds, 30 minutes)",
+        ge=300,
+        le=3600,
+    )
+
+    redis_ttl_agg_results: int = Field(
+        default=1800,
+        description="TTL for aggregation result cache (seconds, 30 minutes)",
+        ge=300,
+        le=3600,
+    )
+
+    # ========================================================================
     # Logging Configuration
     # ========================================================================
 
@@ -260,7 +412,7 @@ class Settings(BaseSettings):
 
     @field_validator("openai_api_key", "anthropic_api_key", mode="before")
     @classmethod
-    def validate_api_keys(cls, value: Optional[str]) -> Optional[str]:
+    def validate_api_keys(cls, value: str | None) -> str | None:
         """Validate API key format if provided.
 
         API keys should start with 'sk-' prefix as per OpenAI and Anthropic
@@ -312,15 +464,64 @@ class Settings(BaseSettings):
 
     @property
     def mongodb_connection_string(self) -> str:
-        """Get the formatted MongoDB connection string.
+        """Get the formatted MongoDB connection string with credentials if provided.
+
+        If mongodb_user and mongodb_password are set, constructs a URI with credentials.
+        Otherwise, returns the mongodb_uri as-is.
 
         Returns:
-            The MongoDB URI from configuration
+            The MongoDB URI with credentials if user/password are provided, otherwise the base URI
 
         Example:
+            >>> settings.mongodb_user = "admin"
+            >>> settings.mongodb_password = "pass123"
             >>> settings.mongodb_connection_string
-            'mongodb://localhost:27017'
+            'mongodb://admin:pass123@localhost:27017/?authSource=admin'
         """
+        # If credentials are provided, construct URI with authentication
+        if self.mongodb_user and self.mongodb_password:
+            # Parse the base URI to extract host and port
+            base_uri = self.mongodb_uri
+            protocol = "mongodb://"
+
+            # Remove protocol if present
+            if base_uri.startswith("mongodb://"):
+                uri_without_protocol = base_uri[10:]  # Remove "mongodb://"
+            elif base_uri.startswith("mongodb+srv://"):
+                protocol = "mongodb+srv://"
+                uri_without_protocol = base_uri[14:]  # Remove "mongodb+srv://"
+            else:
+                uri_without_protocol = base_uri
+
+            # Extract host:port (and any existing path/query)
+            if "/" in uri_without_protocol:
+                host_port, path_query = uri_without_protocol.split("/", 1)
+            else:
+                host_port = uri_without_protocol
+                path_query = ""
+
+            # Construct URI with credentials
+            from urllib.parse import quote_plus
+
+            username = quote_plus(self.mongodb_user)
+            password = quote_plus(self.mongodb_password)
+
+            # Build query parameters
+            query_params = f"authSource={self.mongodb_auth_source}"
+            if path_query:
+                if "?" in path_query:
+                    # Merge with existing query params
+                    query_params = f"{path_query}&{query_params}"
+                else:
+                    # Path without query, add query
+                    query_params = f"{path_query}?{query_params}"
+            else:
+                # No path, add query
+                query_params = f"?{query_params}"
+
+            return f"{protocol}{username}:{password}@{host_port}/{query_params}"
+
+        # No credentials, return URI as-is
         return self.mongodb_uri
 
     @property
@@ -337,6 +538,34 @@ class Settings(BaseSettings):
             'http://127.0.0.1:8000'
         """
         return f"http://{self.mcp_server_host}:{self.mcp_server_port}"
+
+    @property
+    def security_config(self) -> "SecurityConfig":
+        """Get the security configuration object.
+
+        Rationale: Provides a properly configured SecurityConfig object
+        based on the settings. This ensures all security components use
+        consistent configuration derived from environment variables.
+
+        Returns:
+            SecurityConfig: Configured security settings object
+        """
+        from src.mcp_server.security.config import SecurityConfig
+
+        return SecurityConfig(
+            api_key_min_length=32,  # Fixed for security
+            session_timeout_minutes=self.security_session_timeout,
+            max_failed_auth_attempts=5,  # Fixed for security
+            lockout_duration_minutes=15,  # Fixed for security
+            rate_limit_requests_per_minute=self.security_rate_limit,
+            rate_limit_burst=10,  # Fixed burst allowance
+            max_query_results=self.security_max_query_results,
+            max_query_depth=3,  # Fixed for security
+            enable_audit_logging=True,  # Always enabled for HIPAA
+            audit_retention_days=self.security_audit_retention_days,
+            enable_pii_redaction=False,  # Can be configured later if needed
+            # allowed_query_fields uses default from SecurityConfig
+        )
 
     # ========================================================================
     # Helper Methods
@@ -362,16 +591,12 @@ class Settings(BaseSettings):
         """
         if self.llm_provider == LLMProvider.OPENAI:
             if not self.openai_api_key:
-                raise ValueError(
-                    "OPENAI_API_KEY not configured in environment variables"
-                )
+                raise ValueError("OPENAI_API_KEY not configured in environment variables")
             return self.openai_api_key
 
         if self.llm_provider == LLMProvider.ANTHROPIC:
             if not self.anthropic_api_key:
-                raise ValueError(
-                    "ANTHROPIC_API_KEY not configured in environment variables"
-                )
+                raise ValueError("ANTHROPIC_API_KEY not configured in environment variables")
             return self.anthropic_api_key
 
         raise ValueError(f"Unknown LLM provider: {self.llm_provider}")
