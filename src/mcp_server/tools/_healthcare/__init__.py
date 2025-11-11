@@ -15,7 +15,7 @@ Usage:
 """
 
 # Import all tool classes for convenience
-from .clinical_data import AllergyTools, AnalyticsTools as ConditionAnalyticsTools, CarePlansTools
+from .clinical_data import AllergyTools, CarePlansTools, ConditionsTools
 from .clinical_timeline import PatientTimelineTools
 from .demographics import PatientSearchTools
 from .financial import AnalyticsTools as FinancialAnalyticsTools
@@ -24,7 +24,7 @@ from .medications import DrugTools, MedicationTools
 __all__ = [
     "PatientSearchTools",
     "PatientTimelineTools",
-    "ConditionAnalyticsTools",
+    "ConditionsTools",
     "AllergyTools",
     "CarePlansTools",
     "FinancialAnalyticsTools",
