@@ -5,6 +5,7 @@ including claims, explanations of benefits, and billing information.
 """
 
 from .claims import ClaimsTools
+from .eob import EOBTools
 from .financial_analytics import AnalyticsTools
 
-__all__ = ["ClaimsTools", "AnalyticsTools"]
+__all__ = ["ClaimsTools", "EOBTools", "AnalyticsTools"]

@@ -19,7 +19,7 @@ from .clinical_data import AllergyTools, CarePlansTools, ConditionsTools, Immuni
 from .clinical_timeline import PatientTimelineTools
 from .demographics import PatientSearchTools
 from .encounters import EncountersTools
-from .financial import AnalyticsTools as FinancialAnalyticsTools, ClaimsTools
+from .financial import AnalyticsTools as FinancialAnalyticsTools, ClaimsTools, EOBTools
 from .medications import DrugTools, MedicationTools
 
 __all__ = [
@@ -33,6 +33,7 @@ __all__ = [
     "ProceduresTools",
     "EncountersTools",
     "ClaimsTools",
+    "EOBTools",
     "FinancialAnalyticsTools",
     "MedicationTools",
     "DrugTools",
