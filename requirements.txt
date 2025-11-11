@@ -20,6 +20,8 @@ anyio==4.11.0
     #   openai
     #   sse-starlette
     #   starlette
+async-timeout==5.0.1
+    # via redis
 attrs==25.4.0
     # via
     #   aiohttp
@@ -149,6 +151,8 @@ h11==0.16.0
     # via
     #   httpcore
     #   uvicorn
+hiredis==3.3.0
+    # via text-to-mongodb (pyproject.toml)
 httpcore==1.0.9
     # via httpx
 httplib2==0.31.0
@@ -344,6 +348,8 @@ pyyaml==6.0.3
     # via
     #   jsonschema-path
     #   llama-index-core
+redis==7.0.1
+    # via text-to-mongodb (pyproject.toml)
 referencing==0.36.2
     # via
     #   jsonschema
