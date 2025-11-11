@@ -25,7 +25,7 @@ MAX_PIPELINES_PER_BATCH = 50
 
 class BulkOperationsTools(BaseTool):
     """Tools for efficient batch read operations on large datasets.
-    
+
     This class provides methods for executing multiple queries or pipelines
     in batch with safety limits and performance optimization.
     """
@@ -93,12 +93,12 @@ class BulkOperationsTools(BaseTool):
 
         # Observability: Log batch execution
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"EXECUTING BULK FIND QUERIES:\n"
             f"  Collection: {collection_name}\n"
             f"  Total Queries: {len(queries)}\n"
             f"  Limit per Query: {limit_per_query}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Execute queries in thread pool
@@ -110,29 +110,30 @@ class BulkOperationsTools(BaseTool):
             for query in queries:
                 try:
                     if not isinstance(query, dict):
-                        results.append({
-                            "success": False,
-                            "error": f"Query must be dict, got {type(query).__name__}",
-                            "results": []
-                        })
+                        results.append(
+                            {
+                                "success": False,
+                                "error": f"Query must be dict, got {type(query).__name__}",
+                                "results": [],
+                            }
+                        )
                         continue
 
                     cursor = collection.find(query).limit(limit_per_query)
                     docs = list(cursor)
-                    results.append({
-                        "success": True,
-                        "query": query,
-                        "results": docs,
-                        "count": len(docs),
-                    })
+                    results.append(
+                        {
+                            "success": True,
+                            "query": query,
+                            "results": docs,
+                            "count": len(docs),
+                        }
+                    )
                 except Exception as e:
                     logger.error(f"Query execution failed: {e}")
-                    results.append({
-                        "success": False,
-                        "query": query,
-                        "error": str(e),
-                        "results": []
-                    })
+                    results.append(
+                        {"success": False, "query": query, "error": str(e), "results": []}
+                    )
             return results
 
         results = await loop.run_in_executor(executor, execute_queries)
@@ -206,7 +207,9 @@ class BulkOperationsTools(BaseTool):
             raise ValueError("Pipelines list cannot be empty")
 
         if len(pipelines) > MAX_PIPELINES_PER_BATCH:
-            raise ValueError(f"Too many pipelines: {len(pipelines)} (max: {MAX_PIPELINES_PER_BATCH})")
+            raise ValueError(
+                f"Too many pipelines: {len(pipelines)} (max: {MAX_PIPELINES_PER_BATCH})"
+            )
 
         if not isinstance(limit_per_pipeline, int) or limit_per_pipeline <= 0:
             raise ValueError("Limit per pipeline must be a positive integer")
@@ -218,12 +221,12 @@ class BulkOperationsTools(BaseTool):
 
         # Observability: Log batch execution
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"EXECUTING BULK AGGREGATION PIPELINES:\n"
             f"  Collection: {collection_name}\n"
             f"  Total Pipelines: {len(pipelines)}\n"
             f"  Limit per Pipeline: {limit_per_pipeline}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Execute pipelines in thread pool
@@ -235,30 +238,30 @@ class BulkOperationsTools(BaseTool):
             for pipeline in pipelines:
                 try:
                     if not isinstance(pipeline, list):
-                        results.append({
-                            "success": False,
-                            "error": f"Pipeline must be list, got {type(pipeline).__name__}",
-                            "results": []
-                        })
+                        results.append(
+                            {
+                                "success": False,
+                                "error": f"Pipeline must be list, got {type(pipeline).__name__}",
+                                "results": [],
+                            }
+                        )
                         continue
 
                     # Add limit stage for safety
                     pipeline_with_limit = pipeline + [{"$limit": limit_per_pipeline}]
                     cursor = collection.aggregate(pipeline_with_limit)
                     docs = list(cursor)
-                    results.append({
-                        "success": True,
-                        "pipeline_stages": len(pipeline),
-                        "results": docs,
-                        "count": len(docs),
-                    })
+                    results.append(
+                        {
+                            "success": True,
+                            "pipeline_stages": len(pipeline),
+                            "results": docs,
+                            "count": len(docs),
+                        }
+                    )
                 except Exception as e:
                     logger.error(f"Pipeline execution failed: {e}")
-                    results.append({
-                        "success": False,
-                        "error": str(e),
-                        "results": []
-                    })
+                    results.append({"success": False, "error": str(e), "results": []})
             return results
 
         results = await loop.run_in_executor(executor, execute_pipelines)
@@ -339,13 +342,13 @@ class BulkOperationsTools(BaseTool):
 
         # Observability: Log batch read
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"EXECUTING BATCH READ:\n"
             f"  Collection: {collection_name}\n"
             f"  Filter: {filter_query}\n"
             f"  Batch Size: {batch_size}\n"
             f"  Total Limit: {limit}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Execute batch read in thread pool
@@ -355,27 +358,29 @@ class BulkOperationsTools(BaseTool):
         def read_batches():
             batches = []
             cursor = collection.find(filter_query).batch_size(batch_size)
-            
+
             total_fetched = 0
             batch_num = 0
-            
+
             try:
                 for doc in cursor:
                     if total_fetched >= limit:
                         break
-                    
+
                     if len(batches) == 0 or len(batches[-1]["documents"]) >= batch_size:
-                        batches.append({
-                            "batch_number": batch_num,
-                            "documents": [],
-                            "count": 0,
-                        })
+                        batches.append(
+                            {
+                                "batch_number": batch_num,
+                                "documents": [],
+                                "count": 0,
+                            }
+                        )
                         batch_num += 1
-                    
+
                     batches[-1]["documents"].append(doc)
                     batches[-1]["count"] += 1
                     total_fetched += 1
-                
+
                 return batches, total_fetched
             except Exception as e:
                 logger.error(f"Batch read failed: {e}")

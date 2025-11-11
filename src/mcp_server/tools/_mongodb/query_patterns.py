@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class QueryPatternsTools(BaseTool):
     """Tools for working with reusable MongoDB query patterns.
-    
+
     This class provides methods for retrieving, building, and validating
     common query patterns for healthcare data operations.
     """
@@ -71,11 +71,11 @@ class QueryPatternsTools(BaseTool):
 
         # Observability: Log pattern retrieval
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"RETRIEVING QUERY PATTERN:\n"
             f"  Pattern: {pattern_name}\n"
             f"  Parameters Provided: {len(parameters) if parameters else 0}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Get pattern template
@@ -94,12 +94,7 @@ class QueryPatternsTools(BaseTool):
             },
             "date_range": {
                 "description": "Find records within a date range",
-                "query": {
-                    "{{date_field}}": {
-                        "$gte": "{{start_date}}",
-                        "$lte": "{{end_date}}"
-                    }
-                },
+                "query": {"{{date_field}}": {"$gte": "{{start_date}}", "$lte": "{{end_date}}"}},
                 "required_params": ["date_field", "start_date", "end_date"],
                 "optional_params": [],
             },
@@ -118,7 +113,7 @@ class QueryPatternsTools(BaseTool):
                 "description": "Find recent patient encounters",
                 "query": {
                     "patient_id": "{{patient_id}}",
-                    "encounter_date": {"$gte": "{{date_threshold}}"}
+                    "encounter_date": {"$gte": "{{date_threshold}}"},
                 },
                 "required_params": ["patient_id", "date_threshold"],
                 "optional_params": [],
@@ -135,10 +130,7 @@ class QueryPatternsTools(BaseTool):
             },
             "patient_demographics": {
                 "description": "Find patients by demographic criteria",
-                "query": {
-                    "gender": "{{gender}}",
-                    "age_range": "{{age_range}}"
-                },
+                "query": {"gender": "{{gender}}", "age_range": "{{age_range}}"},
                 "required_params": [],
                 "optional_params": ["gender", "age_range", "state"],
             },
@@ -148,7 +140,7 @@ class QueryPatternsTools(BaseTool):
 
         # Validate parameters
         parameters = parameters or {}
-        
+
         for required_param in template["required_params"]:
             if required_param not in parameters:
                 raise ValueError(
@@ -207,23 +199,23 @@ class QueryPatternsTools(BaseTool):
         if start_date:
             try:
                 datetime.fromisoformat(start_date)
-            except ValueError:
-                raise ValueError(f"Invalid start date format. Use ISO 8601: {start_date}")
+            except ValueError as e:
+                raise ValueError(f"Invalid start date format. Use ISO 8601: {start_date}") from e
 
         if end_date:
             try:
                 datetime.fromisoformat(end_date)
-            except ValueError:
-                raise ValueError(f"Invalid end date format. Use ISO 8601: {end_date}")
+            except ValueError as e:
+                raise ValueError(f"Invalid end date format. Use ISO 8601: {end_date}") from e
 
         # Observability: Log query construction
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"BUILDING DATE RANGE QUERY:\n"
             f"  Field: {field}\n"
             f"  Start Date: {start_date}\n"
             f"  End Date: {end_date}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Build query
@@ -292,20 +284,19 @@ class QueryPatternsTools(BaseTool):
 
         # Observability: Log query construction
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"BUILDING TEXT SEARCH QUERY:\n"
             f"  Fields: {fields}\n"
             f"  Search Term: {search_term}\n"
             f"  Case Sensitive: {case_sensitive}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Build query using $or with regex
         regex_options = "" if case_sensitive else "i"
-        
+
         or_conditions = [
-            {field: {"$regex": search_term, "$options": regex_options}}
-            for field in fields
+            {field: {"$regex": search_term, "$options": regex_options}} for field in fields
         ]
 
         query = {"$or": or_conditions}
@@ -361,11 +352,11 @@ class QueryPatternsTools(BaseTool):
 
         # Observability: Log query construction
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"BUILDING PATIENT FILTER QUERY:\n"
             f"  Patient ID: {patient_id}\n"
             f"  Additional Filters: {len(additional_filters)}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Build query
@@ -386,8 +377,8 @@ class QueryPatternsTools(BaseTool):
         """Substitute parameters in a query template (recursive)."""
         if isinstance(template, str):
             result = template
-            for param_name, param_value in parameters.items():
-                placeholder = f"{{{{param_name}}}}"
+            for _param_name, param_value in parameters.items():
+                placeholder = "{{param_name}}"
                 if placeholder in result:
                     result = result.replace(placeholder, str(param_value))
             return result
@@ -399,10 +390,7 @@ class QueryPatternsTools(BaseTool):
             }
 
         elif isinstance(template, list):
-            return [
-                self._substitute_parameters(item, parameters)
-                for item in template
-            ]
+            return [self._substitute_parameters(item, parameters) for item in template]
 
         else:
             return template

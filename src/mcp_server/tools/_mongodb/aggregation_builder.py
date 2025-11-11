@@ -8,7 +8,6 @@ details for verification and audit purposes.
 """
 
 import asyncio
-import json
 import logging
 from typing import Any
 
@@ -44,7 +43,7 @@ MAX_PIPELINE_STAGES = 20
 
 class AggregationBuilderTools(BaseTool):
     """Tools for building, validating, and optimizing MongoDB aggregation pipelines.
-    
+
     This class provides methods for constructing safe aggregation pipelines for
     healthcare data analysis with comprehensive validation and optimization.
     """
@@ -95,21 +94,23 @@ class AggregationBuilderTools(BaseTool):
 
         # Observability: Log pipeline construction attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"BUILDING AGGREGATION PIPELINE:\n"
             f"  Stage Count: {len(stages)}\n"
             f"  Validate: {validate}\n"
             f"  Stages: {[list(stage.keys())[0] if isinstance(stage, dict) else 'INVALID' for stage in stages[:5]]}"
             f"{'...' if len(stages) > 5 else ''}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Validation: Check stage structure and read-only violations
         validation_errors = []
-        
+
         for idx, stage in enumerate(stages):
             if not isinstance(stage, dict):
-                validation_errors.append(f"Stage {idx}: Must be a dictionary, got {type(stage).__name__}")
+                validation_errors.append(
+                    f"Stage {idx}: Must be a dictionary, got {type(stage).__name__}"
+                )
                 continue
 
             if len(stage) != 1:
@@ -146,7 +147,9 @@ class AggregationBuilderTools(BaseTool):
         # Estimate pipeline complexity
         complexity = self._estimate_complexity(stages)
 
-        logger.info(f"✓ Pipeline validated successfully: {len(stages)} stages, complexity={complexity}")
+        logger.info(
+            f"✓ Pipeline validated successfully: {len(stages)} stages, complexity={complexity}"
+        )
 
         return {
             "success": True,
@@ -184,10 +187,7 @@ class AggregationBuilderTools(BaseTool):
 
         # Observability: Log validation attempt
         logger.info(
-            f"\n{'='*70}\n"
-            f"VALIDATING PIPELINE STAGES:\n"
-            f"  Total Stages: {len(stages)}\n"
-            f"{'='*70}"
+            f"\n{'=' * 70}\nVALIDATING PIPELINE STAGES:\n  Total Stages: {len(stages)}\n{'=' * 70}"
         )
 
         valid_indices = []
@@ -195,30 +195,35 @@ class AggregationBuilderTools(BaseTool):
 
         for idx, stage in enumerate(stages):
             if not isinstance(stage, dict) or len(stage) != 1:
-                invalid_stages.append({
-                    "index": idx,
-                    "error": "Stage must be a dictionary with exactly one key"
-                })
+                invalid_stages.append(
+                    {"index": idx, "error": "Stage must be a dictionary with exactly one key"}
+                )
                 continue
 
             stage_name = list(stage.keys())[0]
 
             if stage_name in DESTRUCTIVE_OPERATIONS:
-                invalid_stages.append({
-                    "index": idx,
-                    "stage": stage_name,
-                    "error": f"Destructive operation not allowed in read-only mode"
-                })
+                invalid_stages.append(
+                    {
+                        "index": idx,
+                        "stage": stage_name,
+                        "error": "Destructive operation not allowed in read-only mode",
+                    }
+                )
             elif stage_name not in ALLOWED_PIPELINE_STAGES:
-                invalid_stages.append({
-                    "index": idx,
-                    "stage": stage_name,
-                    "error": f"Operation not supported for healthcare data"
-                })
+                invalid_stages.append(
+                    {
+                        "index": idx,
+                        "stage": stage_name,
+                        "error": "Operation not supported for healthcare data",
+                    }
+                )
             else:
                 valid_indices.append(idx)
 
-        logger.info(f"✓ Validation complete: {len(valid_indices)} valid, {len(invalid_stages)} invalid")
+        logger.info(
+            f"✓ Validation complete: {len(valid_indices)} valid, {len(invalid_stages)} invalid"
+        )
 
         return {
             "success": len(invalid_stages) == 0,
@@ -279,11 +284,11 @@ class AggregationBuilderTools(BaseTool):
 
         # Observability: Log analysis attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"ANALYZING PIPELINE PERFORMANCE:\n"
             f"  Collection: {collection_name}\n"
             f"  Stages: {len(pipeline)}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Execute analysis in thread pool
@@ -385,7 +390,9 @@ class AggregationBuilderTools(BaseTool):
         try:
             return {
                 "stages": len(explain_result.get("stages", [])),
-                "documents_examined": explain_result.get("executionStats", {}).get("totalDocsExamined", 0),
+                "documents_examined": explain_result.get("executionStats", {}).get(
+                    "totalDocsExamined", 0
+                ),
                 "documents_returned": explain_result.get("executionStats", {}).get("nReturned", 0),
             }
         except Exception:

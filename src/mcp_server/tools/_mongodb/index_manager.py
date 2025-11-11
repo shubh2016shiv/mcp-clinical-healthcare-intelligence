@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class IndexManagerTools(BaseTool):
     """Tools for analyzing and optimizing MongoDB indexes.
-    
+
     This class provides methods for examining index usage, identifying missing
     indexes, and suggesting optimizations (read-only analysis only, no creation).
     """
@@ -69,10 +69,10 @@ class IndexManagerTools(BaseTool):
 
         # Observability: Log analysis attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"ANALYZING COLLECTION INDEXES:\n"
             f"  Collection: {collection_name}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Execute index analysis in thread pool
@@ -159,11 +159,11 @@ class IndexManagerTools(BaseTool):
 
         # Observability: Log suggestion attempt
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"SUGGESTING INDEXES:\n"
             f"  Collection: {collection_name}\n"
             f"  Query Patterns: {len(query_patterns) if query_patterns else 0}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Validation: Check query patterns format
@@ -211,22 +211,26 @@ class IndexManagerTools(BaseTool):
         # Suggest indexes on frequently queried fields
         for field, count in sorted(common_fields.items(), key=lambda x: x[1], reverse=True)[:5]:
             if field not in existing_indexed_fields and count > 50:
-                suggestions.append({
-                    "field": field,
-                    "type": "single_field",
-                    "reason": f"Appears in {count}% of documents (likely query candidate)",
-                    "estimated_improvement": "Moderate",
-                })
+                suggestions.append(
+                    {
+                        "field": field,
+                        "type": "single_field",
+                        "reason": f"Appears in {count}% of documents (likely query candidate)",
+                        "estimated_improvement": "Moderate",
+                    }
+                )
 
         # Suggest compound indexes for related fields
         if "patient_id" in common_fields and "status" in common_fields:
             if ("patient_id", "status") not in existing_indexed_fields:
-                suggestions.append({
-                    "fields": ["patient_id", "status"],
-                    "type": "compound",
-                    "reason": "Common filter combination in healthcare queries",
-                    "estimated_improvement": "High",
-                })
+                suggestions.append(
+                    {
+                        "fields": ["patient_id", "status"],
+                        "type": "compound",
+                        "reason": "Common filter combination in healthcare queries",
+                        "estimated_improvement": "High",
+                    }
+                )
 
         logger.info(f"✓ Index suggestions complete: {len(suggestions)} suggestions")
 
@@ -278,11 +282,11 @@ class IndexManagerTools(BaseTool):
 
         # Observability: Log usage analysis
         logger.info(
-            f"\n{'='*70}\n"
+            f"\n{'=' * 70}\n"
             f"ANALYZING INDEX USAGE:\n"
             f"  Collection: {collection_name}\n"
             f"  Specific Index: {index_name or 'All'}\n"
-            f"{'='*70}"
+            f"{'=' * 70}"
         )
 
         # Execute analysis in thread pool
@@ -293,16 +297,16 @@ class IndexManagerTools(BaseTool):
             try:
                 # Get all indexes
                 indexes = list(collection.list_indexes())
-                
+
                 # Build index statistics
                 stats = []
                 for idx in indexes:
                     idx_name = idx.get("name", "")
-                    
+
                     # Skip if specific index requested and this isn't it
                     if index_name and idx_name != index_name:
                         continue
-                    
+
                     stat = {
                         "name": idx_name,
                         "keys": idx.get("key", []),
@@ -311,7 +315,7 @@ class IndexManagerTools(BaseTool):
                         "unique": idx.get("unique", False),
                     }
                     stats.append(stat)
-                
+
                 return stats
             except Exception as e:
                 logger.error(f"Failed to get index stats: {e}")
@@ -321,9 +325,11 @@ class IndexManagerTools(BaseTool):
 
         # Analyze usage patterns
         recommendations = []
-        
+
         if len(index_stats) > 10:
-            recommendations.append(f"Collection has {len(index_stats)} indexes. Consider consolidating overlapping indexes.")
+            recommendations.append(
+                f"Collection has {len(index_stats)} indexes. Consider consolidating overlapping indexes."
+            )
 
         # Identify potentially unused indexes
         unused = []
