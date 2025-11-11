@@ -20,7 +20,7 @@ from .clinical_timeline import PatientTimelineTools
 from .demographics import PatientSearchTools
 from .encounters import EncountersTools
 from .financial import AnalyticsTools as FinancialAnalyticsTools, ClaimsTools, EOBTools
-from .medications import DrugTools, MedicationTools
+from .medications import DrugAnalysisTools, DrugTools, MedicationTools
 
 __all__ = [
     "PatientSearchTools",
@@ -37,4 +37,5 @@ __all__ = [
     "FinancialAnalyticsTools",
     "MedicationTools",
     "DrugTools",
+    "DrugAnalysisTools",
 ]
