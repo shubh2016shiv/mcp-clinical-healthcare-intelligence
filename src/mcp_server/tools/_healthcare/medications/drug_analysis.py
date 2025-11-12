@@ -10,10 +10,9 @@ PATIENT ID DEPENDENCY: Not applicable - this tool operates on drug reference dat
 not patient-specific medication records.
 """
 
-import asyncio
 import logging
 
-from src.mcp_server.database.async_executor import get_executor_pool
+# Async executor removed - now using pure Motor async
 from src.mcp_server.tools._healthcare.medications.models import (
     DrugClassAnalysisRequest,
     DrugClassAnalysisResponse,
@@ -123,17 +122,10 @@ class DrugAnalysisTools(BaseTool):
             f"{'=' * 70}"
         )
 
-        # Execute blocking query in thread pool
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
-
-        # Run find and limit operations in executor
-        cursor = await loop.run_in_executor(
-            executor, lambda: collection.find(query_filter).limit(request.limit)
+        # Execute directly with Motor (async-native)
+        docs = (
+            await collection.find(query_filter).limit(request.limit).to_list(length=request.limit)
         )
-
-        # Convert cursor to list in executor (blocking I/O)
-        docs = await loop.run_in_executor(executor, list, cursor)
 
         # Convert to drug records
         drugs = []
@@ -242,11 +234,8 @@ class DrugAnalysisTools(BaseTool):
             f"{'=' * 70}"
         )
 
-        # Execute aggregation in thread pool (blocking I/O)
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
-
-        results = await loop.run_in_executor(executor, lambda: list(collection.aggregate(pipeline)))
+        # Execute aggregation directly with Motor (async-native)
+        results = await collection.aggregate(pipeline).to_list(length=request.limit)
 
         # Convert to Pydantic models
         classes = [DrugClassGroup(**res) for res in results]

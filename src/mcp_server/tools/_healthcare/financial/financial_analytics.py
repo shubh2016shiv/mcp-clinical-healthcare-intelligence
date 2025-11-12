@@ -7,10 +7,9 @@ PATIENT ID VALIDATION: Supports optional patient_id filtering - when provided,
 results are limited to that patient's claims. Recommended for patient-specific financial analysis.
 """
 
-import asyncio
 import logging
 
-from ....database.async_executor import get_executor_pool
+# Async executor removed - now using pure Motor async
 from ....security import get_security_manager
 from ...base_tool import BaseTool
 from ...models import (
@@ -147,9 +146,7 @@ class FinancialAnalyticsTools(BaseTool):
 
         logger.debug(f"Financial summary query: {query_filter}")
 
-        # Get event loop and executor for async operations
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
+        # Execute directly with Motor (async-native)
 
         # Build aggregation pipeline
         pipeline = [{"$match": query_filter}]
@@ -301,8 +298,8 @@ class FinancialAnalyticsTools(BaseTool):
                 ]
             )
 
-        # Execute aggregation in thread pool (blocking I/O)
-        results = await loop.run_in_executor(executor, lambda: list(collection.aggregate(pipeline)))
+        # Execute aggregation directly with Motor (async-native)
+        results = await collection.aggregate(pipeline).to_list(length=None)
 
         # Convert results to response format
         if not request.group_by:

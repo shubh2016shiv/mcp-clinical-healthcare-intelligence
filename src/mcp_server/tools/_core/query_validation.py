@@ -9,12 +9,10 @@ import logging
 from typing import Any
 
 from src.config.settings import settings
-from src.mcp_server.database.connection import ensure_connected
 
 logger = logging.getLogger(__name__)
 
 
-@ensure_connected
 def validate_mongodb_query(query: str, query_type: str = "find") -> dict[str, Any]:
     """Validate MongoDB query syntax and safety before execution on healthcare data.
 

@@ -11,11 +11,8 @@ from typing import Any
 
 from pymongo.errors import OperationFailure
 
-from src.mcp_server.database.connection import (
-    QueryExecutionError,
-    ensure_connected,
-    get_connection_manager,
-)
+from src.mcp_server.database import database
+from src.mcp_server.database.database import QueryExecutionError
 
 from .query_validation import validate_mongodb_query
 from .result_serialization import serialize_mongodb_result
@@ -23,8 +20,7 @@ from .result_serialization import serialize_mongodb_result
 logger = logging.getLogger(__name__)
 
 
-@ensure_connected
-def execute_mongodb_query(
+async def execute_mongodb_query(
     collection_name: str,
     query: str,
     query_type: str = "find",
@@ -54,7 +50,7 @@ def execute_mongodb_query(
     - Read-only operations protect healthcare privacy
     - Result limiting prevents memory issues with large patient datasets
     - Execution time tracking for performance monitoring
-    - Comprehensive error handling for healthcare data integrity
+    - Comprehensive error handling for healthcare data server_health_checks
     - Query logging for observability and verification
 
     Args:
@@ -111,15 +107,14 @@ def execute_mongodb_query(
                 "collection": collection_name,
             }
 
-        # STEP 2: Get secure connection to healthcare database
-        # Uses the global singleton ConnectionManager, shared with BaseTool
-        # and connection pooling for performance and health checks for reliability
-        manager = get_connection_manager()
-        db = manager.get_database()
+        # STEP 2: Get Motor database instance
+        # Motor handles connection pooling, retries, and async operations automatically
+        db = database.get_database()
 
         # STEP 3: Verify the healthcare collection exists
         # Ensures AI doesn't try to query non-existent collections (e.g., "patients" vs "patient")
-        if collection_name not in db.list_collection_names():
+        collection_names = await db.list_collection_names()
+        if collection_name not in collection_names:
             logger.error(f"Healthcare collection '{collection_name}' does not exist")
             return {
                 "success": False,
@@ -196,18 +191,18 @@ def execute_mongodb_query(
             if query_type == "find":
                 # Standard find query with optional projection
                 cursor = collection.find(parsed_query, projection_dict)
-                results = list(cursor.limit(result_limit))
+                results = await cursor.limit(result_limit).to_list(length=result_limit)
                 count = len(results)
 
             elif query_type == "aggregate":
                 # Aggregation pipeline with result limiting
                 pipeline = parsed_query + [{"$limit": result_limit}]
-                results = list(collection.aggregate(pipeline))
+                results = await collection.aggregate(pipeline).to_list(length=result_limit)
                 count = len(results)
 
             elif query_type == "count":
                 # Count matching documents
-                count = collection.count_documents(parsed_query)
+                count = await collection.count_documents(parsed_query)
                 results = {"count": count}
 
             elif query_type == "distinct":
@@ -222,7 +217,7 @@ def execute_mongodb_query(
                 if not field:
                     raise ValueError("Distinct query must specify 'field' property")
 
-                results = collection.distinct(field, filter_query)
+                results = await collection.distinct(field, filter_query)
                 count = len(results)
 
             else:

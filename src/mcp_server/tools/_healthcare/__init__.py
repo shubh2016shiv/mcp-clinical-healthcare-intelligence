@@ -5,7 +5,7 @@ operational categories: demographics, clinical data, medications, financial, etc
 
 Usage:
     from src.mcp_server.tools._healthcare.clinical_data import AllergyTools, ConditionAnalyticsTools
-    from src.mcp_server.tools._healthcare.demographics import PatientSearchTools
+    from src.mcp_server.tools._healthcare.demographics import search_patients
     from src.mcp_server.tools._healthcare.clinical_timeline import PatientTimelineTools
     from src.mcp_server.tools._healthcare.financial import FinancialAnalyticsTools
     from src.mcp_server.tools._healthcare.medications import (
@@ -25,7 +25,7 @@ from .clinical_data import (
     ProceduresTools,
 )
 from .clinical_timeline import PatientTimelineTools
-from .demographics import PatientSearchTools
+from .demographics import search_patients
 from .encounters import EncountersTools
 from .financial import AnalyticsTools as FinancialAnalyticsTools
 from .financial import ClaimsTools, EOBTools
@@ -35,7 +35,7 @@ from .patient_tools import PatientTools
 __all__ = [
     "PatientTools",
     "AnalyticsTools",
-    "PatientSearchTools",
+    "search_patients",
     "PatientTimelineTools",
     "ConditionsTools",
     "AllergyTools",

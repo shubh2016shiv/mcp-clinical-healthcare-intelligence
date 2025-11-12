@@ -7,11 +7,10 @@ PATIENT ID DEPENDENCY (REQUIRED): This tool operates on a single patient.
 The patient_id field is mandatory and used to fetch all medications for that patient.
 """
 
-import asyncio
 import logging
 from typing import Any
 
-from src.mcp_server.database.async_executor import get_executor_pool
+# Async executor removed - now using pure Motor async
 from src.mcp_server.security import get_security_manager
 from src.mcp_server.tools._healthcare.medications.models import (
     MedicationHistoryRequest,
@@ -142,10 +141,7 @@ class MedicationTools(BaseTool):
             f"{'=' * 70}"
         )
 
-        # Execute blocking query in thread pool
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
-
+        # Execute directly with Motor (async-native)
         if request.include_drug_details:
             # Use aggregation pipeline to join with drugs collection
             pipeline = [
@@ -199,19 +195,14 @@ class MedicationTools(BaseTool):
                 {"$limit": request.limit},
             ]
 
-            # Execute aggregation in thread pool (blocking I/O)
-            results = await loop.run_in_executor(
-                executor, lambda: list(collection.aggregate(pipeline))
-            )
+            # Execute aggregation directly with Motor (async-native)
+            results = await collection.aggregate(pipeline).to_list(length=request.limit)
 
         else:
             # Simple query without enrichment
-            def fetch_medications():
-                cursor = collection.find(query_filter)
-                cursor = cursor.sort("prescribed_date", -1).limit(request.limit)
-                return list(cursor)
-
-            results = await loop.run_in_executor(executor, fetch_medications)
+            cursor = collection.find(query_filter)
+            cursor = cursor.sort("prescribed_date", -1).limit(request.limit)
+            results = await cursor.to_list(length=request.limit)
 
         # Convert results to medication records
         medications = []

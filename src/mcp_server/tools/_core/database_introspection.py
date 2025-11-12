@@ -8,17 +8,13 @@ import logging
 from typing import Any
 
 from src.config.settings import settings
-from src.mcp_server.database.connection import (
-    QueryExecutionError,
-    ensure_connected,
-    get_connection_manager,
-)
+from src.mcp_server.database import database
+from src.mcp_server.database.database import QueryExecutionError
 
 logger = logging.getLogger(__name__)
 
 
-@ensure_connected
-def get_database_collections() -> dict[str, Any]:
+async def get_database_collections() -> dict[str, Any]:
     """List all available healthcare collections in the MongoDB database.
 
     This MCP tool provides database-level introspection to help AI assistants understand
@@ -46,12 +42,11 @@ def get_database_collections() -> dict[str, Any]:
         >>> print(f"Available healthcare collections: {result['collections']}")
     """
     try:
-        # Uses the global singleton ConnectionManager, shared with BaseTool
-        manager = get_connection_manager()
-        db = manager.get_database()
+        # Get Motor database instance
+        db = database.get_database()
 
         # Get list of all collection names in the database
-        collections = db.list_collection_names()
+        collections = await db.list_collection_names()
 
         result = {
             "success": True,
@@ -82,8 +77,7 @@ def get_database_collections() -> dict[str, Any]:
         }
 
 
-@ensure_connected
-def get_collection_schema(collection_name: str) -> dict[str, Any]:
+async def get_collection_schema(collection_name: str) -> dict[str, Any]:
     """Analyze and retrieve schema information for a specific healthcare collection.
 
     This MCP tool performs statistical analysis on a sample of healthcare documents
@@ -128,13 +122,13 @@ def get_collection_schema(collection_name: str) -> dict[str, Any]:
         >>> # Output: ['id', 'code.coding', 'subject.reference', 'onsetDateTime', ...]
     """
     try:
-        # Uses the global singleton ConnectionManager, shared with BaseTool
-        manager = get_connection_manager()
-        db = manager.get_database()
+        # Get Motor database instance
+        db = database.get_database()
         collection = db[collection_name]
 
         # Verify collection exists
-        if collection_name not in db.list_collection_names():
+        collection_names = await db.list_collection_names()
+        if collection_name not in collection_names:
             logger.warning(f"Collection '{collection_name}' does not exist")
             return {
                 "success": False,
@@ -143,7 +137,7 @@ def get_collection_schema(collection_name: str) -> dict[str, Any]:
             }
 
         # Get total document count
-        total_count = collection.count_documents({})
+        total_count = await collection.count_documents({})
 
         # Handle empty collection
         if total_count == 0:
@@ -159,7 +153,9 @@ def get_collection_schema(collection_name: str) -> dict[str, Any]:
 
         # Sample documents for schema analysis (up to 100)
         sample_size = min(100, total_count)
-        sample_docs = list(collection.aggregate([{"$sample": {"size": sample_size}}]))
+        sample_docs = await collection.aggregate([{"$sample": {"size": sample_size}}]).to_list(
+            length=sample_size
+        )
 
         if not sample_docs:
             logger.warning(f"Failed to sample documents from '{collection_name}'")

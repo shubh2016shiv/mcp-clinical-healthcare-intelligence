@@ -8,12 +8,10 @@ details for verification. Note: This tool provides analysis and suggestions only
 no index creation (read-only mode).
 """
 
-import asyncio
 import logging
 from typing import Any
 
 from ....base_tool import BaseTool
-from ....database.async_executor import get_executor_pool
 from ....utils import handle_mongo_errors
 
 logger = logging.getLogger(__name__)
@@ -75,19 +73,16 @@ class IndexManagerTools(BaseTool):
             f"{'=' * 70}"
         )
 
-        # Execute index analysis in thread pool
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
-
-        def fetch_indexes():
-            try:
-                indexes = collection.list_indexes()
-                return list(indexes)
-            except Exception as e:
-                logger.error(f"Failed to list indexes: {e}")
-                return []
-
-        indexes = await loop.run_in_executor(executor, fetch_indexes)
+        # Execute index analysis directly with Motor (async-native)
+        try:
+            indexes = await collection.list_indexes().to_list(length=None)
+        except Exception as e:
+            logger.error(f"Failed to list indexes: {e}")
+            return {
+                "success": False,
+                "collection": collection_name,
+                "error": f"Failed to list indexes: {e}",
+            }
 
         # Organize indexes
         default_index = None
@@ -171,46 +166,35 @@ class IndexManagerTools(BaseTool):
             if not isinstance(query_patterns, list):
                 raise ValueError("Query patterns must be a list of query objects")
 
-        # Get existing indexes
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
-
-        def fetch_existing_indexes():
-            try:
-                indexes = list(collection.list_indexes())
-                indexed_fields = set()
-                for idx in indexes:
-                    for field, _ in idx.get("key", []):
-                        indexed_fields.add(field)
-                return indexed_fields
-            except Exception as e:
-                logger.error(f"Failed to fetch indexes: {e}")
-                return set()
-
-        existing_indexed_fields = await loop.run_in_executor(executor, fetch_existing_indexes)
+        # Get existing indexes directly with Motor
+        try:
+            indexes = await collection.list_indexes().to_list(length=None)
+            indexed_fields = set()
+            for idx in indexes:
+                for field, _ in idx.get("key", []):
+                    indexed_fields.add(field)
+        except Exception as e:
+            logger.error(f"Failed to fetch indexes: {e}")
+            indexed_fields = set()
 
         # Analyze sample documents to identify common fields
-        def analyze_collection():
-            try:
-                sample_docs = list(collection.find().limit(100))
-                common_fields = {}
-                for doc in sample_docs:
-                    for field in doc.keys():
-                        if field != "_id":
-                            common_fields[field] = common_fields.get(field, 0) + 1
-                return common_fields
-            except Exception as e:
-                logger.error(f"Failed to analyze collection: {e}")
-                return {}
-
-        common_fields = await loop.run_in_executor(executor, analyze_collection)
+        try:
+            sample_docs = await collection.find().limit(100).to_list(length=100)
+            common_fields = {}
+            for doc in sample_docs:
+                for field in doc.keys():
+                    if field != "_id":
+                        common_fields[field] = common_fields.get(field, 0) + 1
+        except Exception as e:
+            logger.error(f"Failed to analyze collection: {e}")
+            common_fields = {}
 
         # Generate suggestions
         suggestions = []
 
         # Suggest indexes on frequently queried fields
         for field, count in sorted(common_fields.items(), key=lambda x: x[1], reverse=True)[:5]:
-            if field not in existing_indexed_fields and count > 50:
+            if field not in indexed_fields and count > 50:
                 suggestions.append(
                     {
                         "field": field,
@@ -222,7 +206,7 @@ class IndexManagerTools(BaseTool):
 
         # Suggest compound indexes for related fields
         if "patient_id" in common_fields and "status" in common_fields:
-            if ("patient_id", "status") not in existing_indexed_fields:
+            if ("patient_id", "status") not in indexed_fields:
                 suggestions.append(
                     {
                         "fields": ["patient_id", "status"],
@@ -238,7 +222,7 @@ class IndexManagerTools(BaseTool):
             "success": True,
             "collection": collection_name,
             "suggested_indexes": suggestions,
-            "existing_indexed_fields": sorted(existing_indexed_fields),
+            "existing_indexed_fields": sorted(indexed_fields),
             "note": "Index suggestions are read-only analysis. Use MongoDB admin tools to create indexes.",
         }
 
@@ -289,60 +273,53 @@ class IndexManagerTools(BaseTool):
             f"{'=' * 70}"
         )
 
-        # Execute analysis in thread pool
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
+        # Execute analysis directly with Motor
+        try:
+            # Get all indexes
+            indexes = await collection.list_indexes().to_list(length=None)
 
-        def get_index_stats():
-            try:
-                # Get all indexes
-                indexes = list(collection.list_indexes())
+            # Build index statistics
+            stats = []
+            for idx in indexes:
+                idx_name = idx.get("name", "")
 
-                # Build index statistics
-                stats = []
-                for idx in indexes:
-                    idx_name = idx.get("name", "")
+                # Skip if specific index requested and this isn't it
+                if index_name and idx_name != index_name:
+                    continue
 
-                    # Skip if specific index requested and this isn't it
-                    if index_name and idx_name != index_name:
-                        continue
+                stat = {
+                    "name": idx_name,
+                    "keys": idx.get("key", []),
+                    "size_bytes": idx.get("size", 0),
+                    "sparse": idx.get("sparse", False),
+                    "unique": idx.get("unique", False),
+                }
+                stats.append(stat)
 
-                    stat = {
-                        "name": idx_name,
-                        "keys": idx.get("key", []),
-                        "size_bytes": idx.get("size", 0),
-                        "sparse": idx.get("sparse", False),
-                        "unique": idx.get("unique", False),
-                    }
-                    stats.append(stat)
-
-                return stats
-            except Exception as e:
-                logger.error(f"Failed to get index stats: {e}")
-                return []
-
-        index_stats = await loop.run_in_executor(executor, get_index_stats)
+        except Exception as e:
+            logger.error(f"Failed to get index stats: {e}")
+            stats = []
 
         # Analyze usage patterns
         recommendations = []
 
-        if len(index_stats) > 10:
+        if len(stats) > 10:
             recommendations.append(
-                f"Collection has {len(index_stats)} indexes. Consider consolidating overlapping indexes."
+                f"Collection has {len(stats)} indexes. Consider consolidating overlapping indexes."
             )
 
         # Identify potentially unused indexes
         unused = []
-        for stat in index_stats:
+        for stat in stats:
             if stat["name"] != "_id_" and stat["size_bytes"] == 0:
                 unused.append(stat["name"])
 
-        logger.info(f"✓ Index usage analysis complete: {len(index_stats)} indexes analyzed")
+        logger.info(f"✓ Index usage analysis complete: {len(stats)} indexes analyzed")
 
         return {
             "success": True,
             "collection": collection_name,
-            "index_statistics": index_stats,
+            "index_statistics": stats,
             "unused_indexes": unused,
             "recommendations": recommendations,
             "note": "Index analysis is read-only. Use MongoDB admin tools for index maintenance.",

@@ -7,12 +7,10 @@ OBSERVABILITY: All bulk operations are logged with full details including
 batch counts, result limits, and execution metrics.
 """
 
-import asyncio
 import logging
 from typing import Any
 
 from ....base_tool import BaseTool
-from ....database.async_executor import get_executor_pool
 from ....utils import handle_mongo_errors
 
 logger = logging.getLogger(__name__)
@@ -101,42 +99,33 @@ class BulkOperationsTools(BaseTool):
             f"{'=' * 70}"
         )
 
-        # Execute queries in thread pool
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
-
-        def execute_queries():
-            results = []
-            for query in queries:
-                try:
-                    if not isinstance(query, dict):
-                        results.append(
-                            {
-                                "success": False,
-                                "error": f"Query must be dict, got {type(query).__name__}",
-                                "results": [],
-                            }
-                        )
-                        continue
-
-                    cursor = collection.find(query).limit(limit_per_query)
-                    docs = list(cursor)
+        # Execute queries directly with Motor (async-native)
+        results = []
+        for query in queries:
+            try:
+                if not isinstance(query, dict):
                     results.append(
                         {
-                            "success": True,
-                            "query": query,
-                            "results": docs,
-                            "count": len(docs),
+                            "success": False,
+                            "error": f"Query must be dict, got {type(query).__name__}",
+                            "results": [],
                         }
                     )
-                except Exception as e:
-                    logger.error(f"Query execution failed: {e}")
-                    results.append(
-                        {"success": False, "query": query, "error": str(e), "results": []}
-                    )
-            return results
+                    continue
 
-        results = await loop.run_in_executor(executor, execute_queries)
+                cursor = collection.find(query).limit(limit_per_query)
+                docs = await cursor.to_list(length=limit_per_query)
+                results.append(
+                    {
+                        "success": True,
+                        "query": query,
+                        "results": docs,
+                        "count": len(docs),
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Query execution failed: {e}")
+                results.append({"success": False, "query": query, "error": str(e), "results": []})
 
         # Aggregate statistics
         total_results = sum(r.get("count", 0) for r in results if r.get("success"))
@@ -229,42 +218,35 @@ class BulkOperationsTools(BaseTool):
             f"{'=' * 70}"
         )
 
-        # Execute pipelines in thread pool
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
-
-        def execute_pipelines():
-            results = []
-            for pipeline in pipelines:
-                try:
-                    if not isinstance(pipeline, list):
-                        results.append(
-                            {
-                                "success": False,
-                                "error": f"Pipeline must be list, got {type(pipeline).__name__}",
-                                "results": [],
-                            }
-                        )
-                        continue
-
-                    # Add limit stage for safety
-                    pipeline_with_limit = pipeline + [{"$limit": limit_per_pipeline}]
-                    cursor = collection.aggregate(pipeline_with_limit)
-                    docs = list(cursor)
+        # Execute pipelines directly with Motor (async-native)
+        results = []
+        for pipeline in pipelines:
+            try:
+                if not isinstance(pipeline, list):
                     results.append(
                         {
-                            "success": True,
-                            "pipeline_stages": len(pipeline),
-                            "results": docs,
-                            "count": len(docs),
+                            "success": False,
+                            "error": f"Pipeline must be list, got {type(pipeline).__name__}",
+                            "results": [],
                         }
                     )
-                except Exception as e:
-                    logger.error(f"Pipeline execution failed: {e}")
-                    results.append({"success": False, "error": str(e), "results": []})
-            return results
+                    continue
 
-        results = await loop.run_in_executor(executor, execute_pipelines)
+                # Add limit stage for safety
+                pipeline_with_limit = pipeline + [{"$limit": limit_per_pipeline}]
+                cursor = collection.aggregate(pipeline_with_limit)
+                docs = await cursor.to_list(length=limit_per_pipeline)
+                results.append(
+                    {
+                        "success": True,
+                        "pipeline_stages": len(pipeline),
+                        "results": docs,
+                        "count": len(docs),
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Pipeline execution failed: {e}")
+                results.append({"success": False, "error": str(e), "results": []})
 
         # Aggregate statistics
         total_results = sum(r.get("count", 0) for r in results if r.get("success"))
@@ -351,42 +333,40 @@ class BulkOperationsTools(BaseTool):
             f"{'=' * 70}"
         )
 
-        # Execute batch read in thread pool
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
+        # Execute batch read directly with Motor (async-native)
+        batches = []
+        cursor = collection.find(filter_query).batch_size(batch_size)
 
-        def read_batches():
-            batches = []
-            cursor = collection.find(filter_query).batch_size(batch_size)
+        total_fetched = 0
+        batch_num = 0
 
-            total_fetched = 0
-            batch_num = 0
+        try:
+            async for doc in cursor:
+                if total_fetched >= limit:
+                    break
 
-            try:
-                for doc in cursor:
-                    if total_fetched >= limit:
-                        break
+                if len(batches) == 0 or len(batches[-1]["documents"]) >= batch_size:
+                    batches.append(
+                        {
+                            "batch_number": batch_num,
+                            "documents": [],
+                            "count": 0,
+                        }
+                    )
+                    batch_num += 1
 
-                    if len(batches) == 0 or len(batches[-1]["documents"]) >= batch_size:
-                        batches.append(
-                            {
-                                "batch_number": batch_num,
-                                "documents": [],
-                                "count": 0,
-                            }
-                        )
-                        batch_num += 1
+                batches[-1]["documents"].append(doc)
+                batches[-1]["count"] += 1
+                total_fetched += 1
 
-                    batches[-1]["documents"].append(doc)
-                    batches[-1]["count"] += 1
-                    total_fetched += 1
-
-                return batches, total_fetched
-            except Exception as e:
-                logger.error(f"Batch read failed: {e}")
-                return batches, total_fetched
-
-        batches, total_fetched = await loop.run_in_executor(executor, read_batches)
+        except Exception as e:
+            logger.error(f"Batch read failed: {e}")
+            return {
+                "success": False,
+                "error": f"Batch read failed: {e}",
+                "batches": [],
+                "total_documents": 0,
+            }
 
         logger.info(f"✓ Batch read complete: {len(batches)} batches, {total_fetched} documents")
 

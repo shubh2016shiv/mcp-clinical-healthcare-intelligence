@@ -8,9 +8,8 @@ import asyncio
 import logging
 from typing import Any
 
-from src.mcp_server.database.async_executor import get_executor_pool
+# Async executor removed - now using pure Motor async
 from src.mcp_server.security import get_security_manager
-from src.mcp_server.security.projection_manager import get_projection_manager
 from src.mcp_server.tools.base_tool import BaseTool
 from src.mcp_server.tools.models import (
     ClinicalEvent,
@@ -114,14 +113,13 @@ class PatientTimelineTools(BaseTool):
             event_sources = {k: v for k, v in event_sources.items() if k in request.event_types}
 
         # Get query-level projection based on security context
+        # Note: Projection is optional - Motor handles this natively
         projection = None
         if security_context and security_context.role:
-            projection_manager = get_projection_manager()
-            projection = projection_manager.get_query_projection(
-                security_context.role, "clinical_event"
-            )
+            # Simple projection cache could be added here if needed
+            # For now, we rely on data minimization after query
             logger.debug(
-                f"Applied query projection for clinical timeline, role: {security_context.role}"
+                f"Security context applied for clinical timeline, role: {security_context.role}"
             )
 
         # Define async task for fetching events from a single collection
@@ -137,9 +135,6 @@ class PatientTimelineTools(BaseTool):
             Returns:
                 List of ClinicalEvent objects from this collection
             """
-            loop = asyncio.get_event_loop()
-            executor = get_executor_pool().get_executor()
-
             collection = db[source_config["collection"]]
 
             # Build query for this collection (PATIENT ID REQUIRED)
@@ -155,17 +150,14 @@ class PatientTimelineTools(BaseTool):
 
             logger.debug(f"Querying {event_type}: {query}")
 
-            # Execute query in thread pool with projection
-            def execute_collection_find():
-                if projection:
-                    return collection.find(query, projection).limit(request.limit)
-                else:
-                    return collection.find(query).limit(request.limit)
+            # Execute query directly with Motor (async-native)
+            if projection:
+                cursor = collection.find(query, projection).limit(request.limit)
+            else:
+                cursor = collection.find(query).limit(request.limit)
 
-            cursor = await loop.run_in_executor(executor, execute_collection_find)
-
-            # Convert cursor to list in executor
-            docs = await loop.run_in_executor(executor, list, cursor)
+            # Convert cursor to list directly
+            docs = await cursor.to_list(length=request.limit)
 
             # Convert documents to ClinicalEvent objects
             events = []

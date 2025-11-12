@@ -7,12 +7,10 @@ OBSERVABILITY: All pipeline operations are logged before execution with full
 details for verification and audit purposes.
 """
 
-import asyncio
 import logging
 from typing import Any
 
 from ....base_tool import BaseTool
-from ....database.async_executor import get_executor_pool
 from ....utils import handle_mongo_errors
 
 logger = logging.getLogger(__name__)
@@ -291,20 +289,13 @@ class AggregationBuilderTools(BaseTool):
             f"{'=' * 70}"
         )
 
-        # Execute analysis in thread pool
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
-
-        def execute_explain():
-            try:
-                # Add explain to pipeline
-                explain_result = collection.aggregate(pipeline).explain()
-                return explain_result
-            except Exception as e:
-                logger.error(f"Explain failed: {e}")
-                return None
-
-        explain_result = await loop.run_in_executor(executor, execute_explain)
+        # Execute analysis directly with Motor (async-native)
+        try:
+            # Use Motor's async explain
+            explain_result = await collection.aggregate(pipeline).explain()
+        except Exception as e:
+            logger.error(f"Explain failed: {e}")
+            explain_result = None
 
         if explain_result is None:
             return {

@@ -18,7 +18,7 @@ def serialize_mongodb_result(data: Any) -> str:
 
     This function handles serialization of MongoDB-specific types like ObjectId,
     datetime, Binary, etc., that are not natively JSON serializable. It uses
-    bson.json_util to provide proper conversion while maintaining data integrity.
+    bson.json_util to provide proper conversion while maintaining data server_health_checks.
 
     Args:
         data: MongoDB result data (can be dict, list, or BSON types)

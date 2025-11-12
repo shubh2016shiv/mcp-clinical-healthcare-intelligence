@@ -8,10 +8,9 @@ PATIENT ID VALIDATION: Supports optional patient_id filtering - when provided,
 results are limited to that patient's conditions. Recommended for patient-specific condition analysis.
 """
 
-import asyncio
 import logging
 
-from ....database.async_executor import get_executor_pool
+# Async executor removed - now using pure Motor async
 from ....security import get_security_manager
 from ...base_tool import BaseTool
 from ...models import (
@@ -143,18 +142,16 @@ class ConditionAnalyticsTools(BaseTool):
 
         logger.debug(f"Condition analysis query: {query_filter}")
 
-        # Get event loop and executor for async operations
-        loop = asyncio.get_event_loop()
-        executor = get_executor_pool().get_executor()
+        # Execute directly with Motor (async-native)
 
         # If no grouping requested, return individual records
         if not request.group_by:
-            # Execute query in thread pool
-            def fetch_conditions():
-                cursor = collection.find(query_filter).limit(request.limit)
-                return list(cursor)
-
-            docs = await loop.run_in_executor(executor, fetch_conditions)
+            # Execute query directly with Motor
+            docs = (
+                await collection.find(query_filter)
+                .limit(request.limit)
+                .to_list(length=request.limit)
+            )
             records = []
 
             for doc in docs:
@@ -315,8 +312,8 @@ class ConditionAnalyticsTools(BaseTool):
                 ]
             )
 
-        # Execute aggregation in thread pool (blocking I/O)
-        results = await loop.run_in_executor(executor, lambda: list(collection.aggregate(pipeline)))
+        # Execute aggregation directly with Motor (async-native)
+        results = await collection.aggregate(pipeline).to_list(length=request.limit)
 
         # Convert to response groups
         groups = []

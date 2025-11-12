@@ -1,15 +1,13 @@
-"""Base tool class with optimized connection management.
+"""Simplified base tool class for async database access.
 
-This module provides a base class for all MCP tools with centralized,
-efficient connection handling. Eliminates redundant connection checks and
-optimizes database access patterns.
+This module provides a minimal base class for all MCP tools with direct
+access to the Motor database connection pool.
 
 Key Features:
-    - Shared connection instance across all tools
-    - Connection pooling optimization
-    - Lazy initialization with health checks
-    - Thread-safe operations
-    - Comprehensive logging
+    - Direct access to Motor database
+    - Zero locks (asyncio is single-threaded)
+    - No connection managers
+    - Pure async/await
 
 Example:
     >>> from src.mcp_server.tools.base_tool import BaseTool
@@ -17,189 +15,91 @@ Example:
     ...     async def my_operation(self):
     ...         db = self.get_database()
     ...         collection = db['my_collection']
-    ...         # ... query operations ...
+    ...         async for doc in collection.find(query):
+    ...             process(doc)
 """
 
 import logging
-import threading
-from typing import TYPE_CHECKING, Optional
 
-from pymongo.database import Database
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from ..database.connection import QueryExecutionError, get_connection_manager
-
-if TYPE_CHECKING:
-    from ..database.connection import ConnectionManager
+from ..database import database
 
 logger = logging.getLogger(__name__)
 
 
 class BaseTool:
-    """Base class for all MCP tools with optimized connection management.
+    """Simplified base class for all MCP tools.
 
-    Provides a shared, efficiently managed database connection instance for
-    all tools. Implements connection pooling and lazy initialization patterns.
+    Provides direct access to the Motor database connection pool.
+    No locks, no managers, just simple async access.
 
-    This class should be inherited by all tool classes to ensure consistent,
-    optimal connection management across the application.
-
-    Attributes:
-        _shared_db: Class-level shared database instance
-        _shared_connection_manager: Class-level shared connection manager
+    This class should be inherited by all tool classes to ensure consistent
+    database access across the application.
     """
 
-    # Class-level shared resources (singleton pattern)
-    _shared_db: Database | None = None
-    _shared_connection_manager: Optional["ConnectionManager"] = None
-    _lock: threading.Lock = threading.Lock()
-
     def __init__(self) -> None:
-        """Initialize tool with optimized connection setup.
+        """Initialize tool.
 
-        Uses class-level shared resources to avoid redundant connection
-        management per tool instance.
+        No connection setup needed - database is initialized at startup.
         """
-        # No need for instance-level db - use class-level shared resource
         logger.debug(f"Initialized {self.__class__.__name__}")
 
-    @classmethod
-    def _ensure_connection(cls) -> None:
-        """Ensure shared connection is established (called once at class load).
+    def get_database(self) -> AsyncIOMotorDatabase:
+        """Get the Motor database instance.
 
-        This method is called automatically when first tool method accesses
-        the database, establishing the shared connection pool.
-
-        Thread-safe: Uses locking to prevent race conditions during initialization.
-
-        Raises:
-            QueryExecutionError: If connection cannot be established
-        """
-        if cls._shared_connection_manager is None:
-            with cls._lock:
-                # Double-check pattern to avoid race conditions
-                if cls._shared_connection_manager is None:
-                    cls._shared_connection_manager = get_connection_manager()
-
-        if not cls._shared_connection_manager.is_connected():
-            logger.debug("Establishing shared database connection for tools...")
-            if not cls._shared_connection_manager.connect():
-                raise QueryExecutionError(
-                    "Failed to establish shared database connection", operation="connection_setup"
-                )
-
-    @classmethod
-    def get_shared_database(cls) -> Database:
-        """Get the shared, pooled database instance.
-
-        This is the optimized method for accessing the database. All tool
-        instances share a single database connection, eliminating connection
-        pooling overhead.
-
-        Thread-safe: Uses locking to prevent race conditions during initialization.
+        Returns the shared Motor database. No health checks, no locks.
+        Motor handles connection management automatically.
 
         Returns:
-            Shared MongoDB Database instance
+            AsyncIOMotorDatabase instance
 
         Raises:
-            QueryExecutionError: If connection is not available
+            RuntimeError: If database not initialized at startup
+
+        Example:
+            >>> tool = MyTool()
+            >>> db = tool.get_database()
+            >>> collection = db['patients']
+        """
+        return database.get_database()
+
+    @classmethod
+    def get_shared_database(cls) -> AsyncIOMotorDatabase:
+        """Get database instance (class method for compatibility).
+
+        Class method that delegates to the database module.
+        Maintains backward compatibility with existing tool implementations.
+
+        Returns:
+            AsyncIOMotorDatabase instance
 
         Example:
             >>> db = MyTool.get_shared_database()
             >>> collection = db['my_collection']
         """
-        cls._ensure_connection()
-
-        if cls._shared_db is None:
-            with cls._lock:
-                # Double-check pattern to avoid race conditions
-                if cls._shared_db is None:
-                    cls._shared_db = cls._shared_connection_manager.get_database()
-                    logger.debug("Initialized shared database instance for tools")
-
-        # Add health check
-        if not cls._shared_connection_manager.health_check():
-            logger.warning("Connection health check failed, reconnecting...")
-            cls.reset_shared_connection()
-            # After reset, get the database instance again
-            with cls._lock:
-                cls._shared_db = cls._shared_connection_manager.get_database()
-
-        return cls._shared_db
-
-    def get_database(self) -> Database:
-        """Get database instance (instance method for compatibility).
-
-        Instance method that delegates to the class-level shared database.
-        Maintains backward compatibility with existing tool implementations.
-
-        Returns:
-            Shared MongoDB Database instance
-
-        Example:
-            >>> tool = MyTool()
-            >>> db = tool.get_database()
-        """
-        return self.__class__.get_shared_database()
+        return database.get_database()
 
     @classmethod
-    def get_connection_manager(cls) -> "ConnectionManager":
-        """Get the shared connection manager instance.
+    async def health_check(cls) -> bool:
+        """Check database connection status.
+
+        Optional health check - Motor handles reconnection automatically.
+        Use this for health endpoints or diagnostics.
 
         Returns:
-            Shared ConnectionManager instance
+            True if database responds to ping, False otherwise
 
         Example:
-            >>> manager = MyTool.get_connection_manager()
-            >>> if manager.is_connected():
-            ...     print("Connected to MongoDB")
+            >>> if not await MyTool.health_check():
+            ...     print("Database unavailable")
         """
-        if cls._shared_connection_manager is None:
-            cls._ensure_connection()
-        return cls._shared_connection_manager
-
-    @classmethod
-    def health_check(cls) -> bool:
-        """Perform health check on shared database connection.
-
-        Checks the status of the shared connection and reconnects if needed.
-
-        Returns:
-            True if connection is healthy, False otherwise
-
-        Example:
-            >>> if not MyTool.health_check():
-            ...     # Handle connection issue
-            ...     pass
-        """
-        if cls._shared_connection_manager is None:
-            return False
-
-        return cls._shared_connection_manager.health_check()
-
-    @classmethod
-    def reset_shared_connection(cls) -> None:
-        """Reset and re-establish the shared connection.
-
-        Thread-safe: Uses locking to prevent race conditions during reset.
-
-        Useful for handling reconnection after network issues or
-        for testing purposes.
-
-        Example:
-            >>> MyTool.reset_shared_connection()
-        """
-        logger.info(f"Resetting shared connection for {cls.__name__}")
-        with cls._lock:
-            if cls._shared_connection_manager:
-                cls._shared_connection_manager.disconnect()
-            cls._shared_db = None
-        cls._ensure_connection()
+        return await database.health_check()
 
     def __repr__(self) -> str:
         """Return string representation of the tool instance.
 
         Returns:
-            String representation including class name and connection status
+            String representation including class name
         """
-        connection_status = "connected" if self.__class__.health_check() else "disconnected"
-        return f"{self.__class__.__name__}(connection={connection_status})"
+        return f"{self.__class__.__name__}()"

@@ -31,7 +31,7 @@ from ..models import (
     SearchPatientsRequest,
 )
 from .clinical_timeline import PatientTimelineTools
-from .demographics import PatientSearchTools
+from .demographics import search_patients as search_patients_func
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class PatientTools(BaseTool):
     """Backward-compatible wrapper for patient-centric healthcare data queries.
 
     This class delegates to specialized tool classes organized by operational category:
-    - PatientSearchTools: Handles patient demographics searches
+    - search_patients_func: Handles patient demographics searches
     - PatientTimelineTools: Handles comprehensive clinical timelines
 
     All methods use the shared database connection manager and include proper error handling.
@@ -52,7 +52,6 @@ class PatientTools(BaseTool):
         """Initialize patient tools with delegated tool instances."""
         super().__init__()
         # Initialize specialized tool instances
-        self._search_tools = PatientSearchTools()
         self._timeline_tools = PatientTimelineTools()
 
     async def search_patients(
@@ -78,7 +77,7 @@ class PatientTools(BaseTool):
         Returns:
             List of matching patient summaries
         """
-        return await self._search_tools.search_patients(request, security_context)
+        return await search_patients_func(request, security_context)
 
     async def get_patient_clinical_timeline(
         self, request: ClinicalTimelineRequest, security_context: Any = None

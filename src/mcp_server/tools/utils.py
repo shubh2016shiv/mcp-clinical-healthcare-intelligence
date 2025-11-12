@@ -32,7 +32,7 @@ def handle_mongo_errors(func: Callable) -> Callable:
     """Decorator for consistent error handling across MongoDB operations.
 
     This decorator wraps MongoDB operations with comprehensive error handling,
-    providing consistent error responses and logging.
+    providing consistent error responses and logging with proper error context.
 
     Args:
         func: The function to decorate
@@ -52,21 +52,86 @@ def handle_mongo_errors(func: Callable) -> Callable:
         try:
             return await func(*args, **kwargs)
         except OperationFailure as e:
-            logger.error(f"MongoDB operation failed in {func.__name__}: {e.code} {e.details}")
+            error_msg = f"MongoDB operation failed in {func.__name__}"
+            logger.error(f"{error_msg}: {e.code} {e.details}", exc_info=True)
             return ErrorResponse(
                 error="Database operation failed",
                 details=f"Operation failed with code {e.code}: {e.details}",
                 operation=func.__name__,
             )
         except PyMongoError as e:
-            logger.error(f"MongoDB error in {func.__name__}: {e}")
+            error_msg = f"MongoDB error in {func.__name__}"
+            logger.error(f"{error_msg}: {e}", exc_info=True)
             return ErrorResponse(
                 error="Database error occurred", details=str(e), operation=func.__name__
             )
+        except ValueError as e:
+            # Validation errors should be propagated with details
+            error_msg = f"Validation error in {func.__name__}"
+            logger.warning(f"{error_msg}: {e}")
+            return ErrorResponse(error="Validation error", details=str(e), operation=func.__name__)
         except Exception as e:
-            logger.error(f"Unexpected error in {func.__name__}: {e}", exc_info=True)
+            # Catch-all for unexpected errors
+            error_msg = f"Unexpected error in {func.__name__}"
+            logger.error(f"{error_msg}: {type(e).__name__}: {e}", exc_info=True)
             return ErrorResponse(
-                error="Unexpected error occurred", details=str(e), operation=func.__name__
+                error="Unexpected error occurred",
+                details=f"{type(e).__name__}: {str(e)}",
+                operation=func.__name__,
+            )
+
+    return wrapper
+
+
+def handle_errors_sync(func: Callable) -> Callable:
+    """Decorator for consistent error handling across synchronous operations.
+
+    Similar to handle_mongo_errors but for synchronous functions.
+
+    Args:
+        func: The synchronous function to decorate
+
+    Returns:
+        Wrapped function with error handling
+
+    Example:
+        @handle_errors_sync
+        def process_data(self, data):
+            # Processing here
+            return result
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except OperationFailure as e:
+            error_msg = f"MongoDB operation failed in {func.__name__}"
+            logger.error(f"{error_msg}: {e.code} {e.details}", exc_info=True)
+            return ErrorResponse(
+                error="Database operation failed",
+                details=f"Operation failed with code {e.code}: {e.details}",
+                operation=func.__name__,
+            )
+        except PyMongoError as e:
+            error_msg = f"MongoDB error in {func.__name__}"
+            logger.error(f"{error_msg}: {e}", exc_info=True)
+            return ErrorResponse(
+                error="Database error occurred", details=str(e), operation=func.__name__
+            )
+        except ValueError as e:
+            # Validation errors should be propagated with details
+            error_msg = f"Validation error in {func.__name__}"
+            logger.warning(f"{error_msg}: {e}")
+            return ErrorResponse(error="Validation error", details=str(e), operation=func.__name__)
+        except Exception as e:
+            # Catch-all for unexpected errors
+            error_msg = f"Unexpected error in {func.__name__}"
+            logger.error(f"{error_msg}: {type(e).__name__}: {e}", exc_info=True)
+            return ErrorResponse(
+                error="Unexpected error occurred",
+                details=f"{type(e).__name__}: {str(e)}",
+                operation=func.__name__,
             )
 
     return wrapper

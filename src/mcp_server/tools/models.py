@@ -63,7 +63,9 @@ class SearchPatientsRequest(BaseModel):
     )
     patient_id: str | None = Field(None, description="Exact patient ID for precise lookup")
     city: str | None = Field(None, description="City from patient's address")
-    state: str | None = Field(None, description="State code (e.g., 'TX', 'CA')")
+    state: str | None = Field(
+        None, description="State code (e.g., 'TX', 'CA') or full name (e.g., 'Texas')"
+    )
     birth_date_start: str | None = Field(
         None, description="Filter patients born on or after this date (YYYY-MM-DD)"
     )
@@ -71,6 +73,7 @@ class SearchPatientsRequest(BaseModel):
         None, description="Filter patients born on or before this date (YYYY-MM-DD)"
     )
     gender: Literal["male", "female", "other"] | None = Field(None, description="Patient's gender")
+    race: str | None = Field(None, description="Patient's race (case-insensitive partial match)")
     limit: int = Field(20, ge=1, le=200, description="Maximum number of results (1-200)")
 
     @field_validator("patient_id")
