@@ -29,6 +29,15 @@ from pathlib import Path
 
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+
+# Import validation functions
+# Add project root to path for validate_server imports
+sys.path.insert(0, str(PROJECT_ROOT))
+try:
+    from mcp_server_management.validate_server import run_integrity_checks
+except ImportError:
+    # Fallback if import fails
+    run_integrity_checks = None
 VENV_PYTHON = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
 SERVER_MODULE = "src.mcp_server.server"
 PID_FILE = PROJECT_ROOT / ".mcp_server.pid"
@@ -326,6 +335,22 @@ def start_server_stdio():
         return False
     print()
 
+    # Run integrity validation checks
+    print("[INFO]  Running server integrity validation...")
+    print("-" * 60)
+    if run_integrity_checks is None:
+        print("[WARNING] Validation module not available, skipping checks...")
+    else:
+        validation_passed = run_integrity_checks()
+        print("-" * 60)
+        if not validation_passed:
+            print("[ERROR] Server integrity validation failed")
+            print("[ERROR] Cannot start MCP server: Validation checks did not pass")
+            print("[INFO]  Please fix the failed checks before starting the server")
+            return False
+        print("[SUCCESS] All integrity checks passed")
+    print()
+
     python_exe = get_python_executable()
     print(f"[START] Starting MCP server in STDIO mode using: {python_exe}")
     print(f"[DIR]   Working directory: {PROJECT_ROOT}")
@@ -457,6 +482,22 @@ def start_server_http(host="127.0.0.1", port=8000):
     if not ensure_mongodb_available():
         print("[ERROR] Cannot start MCP server: MongoDB is not available")
         return False
+    print()
+
+    # Run integrity validation checks
+    print("[INFO]  Running server integrity validation...")
+    print("-" * 60)
+    if run_integrity_checks is None:
+        print("[WARNING] Validation module not available, skipping checks...")
+    else:
+        validation_passed = run_integrity_checks()
+        print("-" * 60)
+        if not validation_passed:
+            print("[ERROR] Server integrity validation failed")
+            print("[ERROR] Cannot start MCP server: Validation checks did not pass")
+            print("[INFO]  Please fix the failed checks before starting the server")
+            return False
+        print("[SUCCESS] All integrity checks passed")
     print()
 
     python_exe = get_python_executable()

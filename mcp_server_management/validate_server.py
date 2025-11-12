@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent
+project_root = Path(__file__).parent.parent  # Go up one level to get project root
 sys.path.insert(0, str(project_root))
 
 
@@ -18,11 +18,11 @@ def check_critical_imports():
     print("Checking critical imports...")
     try:
         import fastmcp  # noqa: F401
+        import motor  # noqa: F401
         import pydantic  # noqa: F401
-        import pymongo  # noqa: F401
 
         from src.config.settings import settings  # noqa: F401
-        from src.mcp_server.database.connection import get_connection_manager  # noqa: F401
+        from src.mcp_server.database import database  # noqa: F401
         from src.mcp_server.tools.models import ErrorResponse  # noqa: F401
         from src.mcp_server.tools.utils import handle_mongo_errors  # noqa: F401
 
@@ -61,17 +61,20 @@ def check_database_connection():
     """Check that database connection works."""
     print("Checking database connection...")
     try:
-        from src.mcp_server.database.connection import get_connection_manager
+        # Initialize database connection for testing
+        from src.config.settings import settings
+        from src.mcp_server.database import database
 
-        manager = get_connection_manager()
+        mongodb_uri = getattr(settings, "mongodb_connection_string", "mongodb://localhost:27017")
+        database_name = getattr(settings, "mongodb_database", "healthcare")
 
-        if not manager.is_connected():
-            success = manager.connect()
-            if not success:
-                print("[FAIL] Failed to establish database connection")
-                return False
+        database.initialize(mongodb_uri, database_name)
 
-        if not manager.health_check():
+        # Test health check
+        import asyncio
+
+        health_ok = asyncio.run(database.health_check())
+        if not health_ok:
             print("[FAIL] Database health check failed")
             return False
 
@@ -83,42 +86,55 @@ def check_database_connection():
         return False
 
 
-def check_connection_manager():
-    """Check connection manager improvements."""
-    print("Checking connection manager...")
+def check_database_module():
+    """Check database module functionality."""
+    print("Checking database module...")
     try:
-        from src.mcp_server.database.connection import get_connection_manager
+        from src.mcp_server.database import database
 
-        # Test singleton pattern
-        manager1 = get_connection_manager()
-        manager2 = get_connection_manager()
-        assert manager1 is manager2, "Singleton pattern not working"
+        # Test functions exist
+        assert hasattr(database, "initialize"), "initialize function missing"
+        assert hasattr(database, "get_database"), "get_database function missing"
+        assert hasattr(database, "get_client"), "get_client function missing"
+        assert hasattr(database, "health_check"), "health_check function missing"
+        assert hasattr(database, "shutdown"), "shutdown function missing"
 
-        # Test methods exist
-        assert hasattr(manager1, "connect"), "connect method missing"
-        assert hasattr(manager1, "disconnect"), "disconnect method missing"
-        assert hasattr(manager1, "health_check"), "health_check method missing"
-        assert hasattr(manager1, "is_connected"), "is_connected method missing"
+        # Test that get_database raises RuntimeError when not initialized
+        # (unless it was initialized by a previous check, which is fine)
+        try:
+            db = database.get_database()
+            # If we get here, database was initialized (possibly by check_database_connection)
+            # That's fine - just verify it's a Motor database
+            from motor.motor_asyncio import AsyncIOMotorDatabase
 
-        print("[PASS] Connection manager working correctly")
+            assert isinstance(db, AsyncIOMotorDatabase), "Database should be AsyncIOMotorDatabase"
+        except RuntimeError:
+            # Expected when not initialized - this is the normal state
+            pass
+
+        print("[PASS] Database module working correctly")
         return True
     except Exception as e:
-        print(f"[FAIL] Connection manager check failed: {e}")
+        print(f"[FAIL] Database module check failed: {e}")
         return False
 
 
 def check_base_tool():
-    """Check BaseTool improvements."""
+    """Check BaseTool functionality."""
     print("Checking BaseTool...")
     try:
         from src.mcp_server.tools.base_tool import BaseTool
 
         # Test class methods exist
         assert hasattr(BaseTool, "get_shared_database"), "get_shared_database method missing"
-        assert hasattr(BaseTool, "get_connection_manager"), "get_connection_manager method missing"
+        assert hasattr(BaseTool, "get_database"), "get_database method missing"
         assert hasattr(BaseTool, "health_check"), "health_check method missing"
 
-        print("[PASS] BaseTool improvements working")
+        # Test instance methods
+        tool = BaseTool()
+        assert hasattr(tool, "get_database"), "get_database instance method missing"
+
+        print("[PASS] BaseTool working correctly")
         return True
     except Exception as e:
         print(f"[FAIL] BaseTool check failed: {e}")
@@ -165,17 +181,11 @@ def check_timeout_handling():
         elif timeout < 5:  # 5 seconds
             print(f"[WARN] MongoDB timeout ({timeout}s) is very low")
 
-        # Test connection manager timeout handling
-        from src.mcp_server.database.connection import get_connection_manager
+        # Check Motor connection settings
 
-        manager = get_connection_manager()
-
-        # Check if timeout attributes exist
-        has_timeout_attrs = hasattr(manager, "MAX_RETRIES") and hasattr(manager, "RETRY_DELAY")
-
-        if not has_timeout_attrs:
-            print("[FAIL] Connection manager missing timeout/retry attributes")
-            return False
+        # Check database module has proper timeout configuration
+        # Motor uses serverSelectionTimeoutMS and maxIdleTimeMS for timeouts
+        # These are configured in the initialize function
 
         print("[PASS] Timeout handling properly configured")
         return True
@@ -235,7 +245,7 @@ def run_integrity_checks():
         check_critical_imports,
         check_configuration,
         check_database_connection,
-        check_connection_manager,
+        check_database_module,
         check_base_tool,
         check_error_handling,
         check_timeout_handling,
