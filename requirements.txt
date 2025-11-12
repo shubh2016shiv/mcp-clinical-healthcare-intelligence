@@ -237,6 +237,8 @@ more-itertools==10.8.0
     # via
     #   jaraco-classes
     #   jaraco-functools
+motor==3.7.1
+    # via text-to-mongodb (pyproject.toml)
 multidict==6.7.0
     # via
     #   aiohttp
@@ -326,7 +328,7 @@ pygments==2.19.2
 pyjwt==2.10.1
     # via mcp
 pymongo==4.15.3
-    # via text-to-mongodb (pyproject.toml)
+    # via motor
 pyparsing==3.2.5
     # via httplib2
 pyperclip==1.11.0
