@@ -58,6 +58,14 @@ htmlcov/
 
 
 
+# MCP Server Runtime
+
+.mcp_server.pid
+
+.mcp_server.config
+
+
+
 # OS
 
 .DS_Store
