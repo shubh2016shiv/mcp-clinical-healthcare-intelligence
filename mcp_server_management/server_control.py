@@ -335,8 +335,8 @@ def start_server_stdio():
         return False
     print()
 
-    # Run integrity validation checks
-    print("[INFO]  Running server integrity validation...")
+    # Run server_health_checks validation checks
+    print("[INFO]  Running server server_health_checks validation...")
     print("-" * 60)
     if run_integrity_checks is None:
         print("[WARNING] Validation module not available, skipping checks...")
@@ -344,11 +344,11 @@ def start_server_stdio():
         validation_passed = run_integrity_checks()
         print("-" * 60)
         if not validation_passed:
-            print("[ERROR] Server integrity validation failed")
+            print("[ERROR] Server server_health_checks validation failed")
             print("[ERROR] Cannot start MCP server: Validation checks did not pass")
             print("[INFO]  Please fix the failed checks before starting the server")
             return False
-        print("[SUCCESS] All integrity checks passed")
+        print("[SUCCESS] All server_health_checks checks passed")
     print()
 
     python_exe = get_python_executable()
@@ -484,8 +484,8 @@ def start_server_http(host="127.0.0.1", port=8000):
         return False
     print()
 
-    # Run integrity validation checks
-    print("[INFO]  Running server integrity validation...")
+    # Run server_health_checks validation checks
+    print("[INFO]  Running server server_health_checks validation...")
     print("-" * 60)
     if run_integrity_checks is None:
         print("[WARNING] Validation module not available, skipping checks...")
@@ -493,11 +493,11 @@ def start_server_http(host="127.0.0.1", port=8000):
         validation_passed = run_integrity_checks()
         print("-" * 60)
         if not validation_passed:
-            print("[ERROR] Server integrity validation failed")
+            print("[ERROR] Server server_health_checks validation failed")
             print("[ERROR] Cannot start MCP server: Validation checks did not pass")
             print("[INFO]  Please fix the failed checks before starting the server")
             return False
-        print("[SUCCESS] All integrity checks passed")
+        print("[SUCCESS] All server_health_checks checks passed")
     print()
 
     python_exe = get_python_executable()
@@ -725,7 +725,7 @@ def show_status():
 
 
 def run_validation():
-    """Run integrity checks on the MCP server.
+    """Run server_health_checks checks on the MCP server.
 
     Returns:
         True if validation passed, False otherwise
@@ -738,7 +738,7 @@ def run_validation():
         print("   Skipping validation...")
         return True
 
-    print("[INFO] Running integrity checks...")
+    print("[INFO] Running server_health_checks checks...")
     print("-" * 60)
 
     try:
@@ -782,7 +782,7 @@ def run_health_check():
     print("-" * 60)
 
     try:
-        # Run integrity test for quick check
+        # Run server_health_checks test for quick check
         test_script = PROJECT_ROOT / "mcp_server_management" / "validate_server.py"
 
         if not test_script.exists():
@@ -859,7 +859,9 @@ Examples:
     parser.add_argument("--restart", action="store_true", help="Restart the MCP server")
     parser.add_argument("--status", action="store_true", help="Show server status")
     parser.add_argument(
-        "--validate", action="store_true", help="Run integrity checks before starting server"
+        "--validate",
+        action="store_true",
+        help="Run server_health_checks checks before starting server",
     )
     parser.add_argument(
         "--check", action="store_true", help="Run quick health check without starting server"

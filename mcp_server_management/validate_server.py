@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Integrity validation script for MCP server.
 
-This script performs comprehensive integrity checks on the MCP server
+This script performs comprehensive server_health_checks checks on the MCP server
 components before allowing the server to start.
 """
 
@@ -195,10 +195,10 @@ def check_timeout_handling():
 
 
 def check_operational_integrity():
-    """Check operational integrity including connection pooling."""
-    print("Checking operational integrity...")
+    """Check operational server_health_checks including connection pooling."""
+    print("Checking operational server_health_checks...")
     try:
-        from src.mcp_server.integrity import OperationalIntegrityChecker
+        from src.mcp_server.server_health_checks import OperationalIntegrityChecker
 
         checker = OperationalIntegrityChecker()
         all_checks = checker.run_operational_checks()
@@ -221,22 +221,22 @@ def check_operational_integrity():
 
         success_rate = passed / total if total > 0 else 0
         if success_rate >= 0.8:  # 80% pass rate
-            print(f"[PASS] Operational integrity: {passed}/{total} checks passed")
+            print(f"[PASS] Operational server_health_checks: {passed}/{total} checks passed")
             return True
         else:
-            print(f"[FAIL] Operational integrity: Only {passed}/{total} checks passed")
+            print(f"[FAIL] Operational server_health_checks: Only {passed}/{total} checks passed")
             return False
 
     except ImportError:
-        print("[FAIL] Operational integrity checker not available")
+        print("[FAIL] Operational server_health_checks checker not available")
         return False
     except Exception as e:
-        print(f"[FAIL] Operational integrity check failed: {e}")
+        print(f"[FAIL] Operational server_health_checks check failed: {e}")
         return False
 
 
 def run_integrity_checks():
-    """Run all integrity checks."""
+    """Run all server_health_checks checks."""
     print("=" * 60)
     print("MCP SERVER INTEGRITY VALIDATION")
     print("=" * 60)
