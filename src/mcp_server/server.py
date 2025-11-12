@@ -22,6 +22,7 @@ Usage:
 """
 
 import logging
+import os
 from typing import Any
 
 from fastmcp import FastMCP
@@ -97,9 +98,20 @@ def create_server() -> FastMCP:
     server = FastMCP(name="healthcare-mcp-server", instructions=system_instructions)
 
     # Initialize database connection
+    # Allow server to start even if MongoDB is temporarily unavailable
+    # Tools will handle connection errors when actually called
     logger.info("Initializing database connection...")
     db_manager = get_connection_manager()
-    db_manager.connect()
+    try:
+        db_manager.connect()
+        logger.info("Database connection established successfully")
+    except Exception as e:
+        logger.warning(
+            f"Database connection failed during initialization: {e}\n"
+            f"Server will start anyway. Tools will attempt to connect when called.\n"
+            f"Please ensure MongoDB is running and accessible."
+        )
+        # Don't raise - allow server to start and retry connections when tools are used
 
     # Initialize security layer
     if settings.security_enabled:
@@ -396,11 +408,29 @@ def create_server() -> FastMCP:
 
 
 def main():
-    """Main entry point for the MCP server."""
-    try:
-        logger.info("Starting Healthcare MCP Server...")
+    """Main entry point for the MCP server.
 
-        # Create and run the server
+    Supports two transport modes:
+    1. STDIO mode (default): Reads JSON-RPC from stdin, writes to stdout
+    2. HTTP mode: Listens on HTTP endpoint for JSON-RPC over HTTP
+
+    Transport mode is controlled via environment variables:
+    - MCP_TRANSPORT: 'stdio' (default) or 'http'
+    - MCP_HOST: HTTP host (default: 127.0.0.1)
+    - MCP_PORT: HTTP port (default: 8000)
+    """
+    try:
+        # Get transport configuration from environment variables
+        transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+        host = os.getenv("MCP_HOST", "127.0.0.1")
+        port = int(os.getenv("MCP_PORT", "8000"))
+
+        logger.info("Starting Healthcare MCP Server...")
+        logger.info(f"Transport mode: {transport.upper()}")
+        if transport == "http":
+            logger.info(f"HTTP endpoint: http://{host}:{port}")
+
+        # Create and configure the server
         server = create_server()
 
         logger.info("Healthcare MCP Server initialized successfully")
@@ -408,13 +438,34 @@ def main():
             "Available tools: search_patients, get_patient_clinical_timeline, analyze_conditions, get_financial_summary, get_medication_history, search_drugs, analyze_drug_classes"
         )
 
-        # Run the server
-        server.run()
+        # Run the server in the appropriate transport mode
+        if transport == "http":
+            # HTTP mode: Server listens on HTTP endpoint
+            logger.info(f"Server starting in HTTP mode on {host}:{port}...")
+            logger.info("Server will handle JSON-RPC over HTTP and can serve multiple clients")
+
+            # FastMCP supports HTTP transport natively
+            server.run(transport="http", host=host, port=port)
+
+        else:
+            # STDIO mode (default): Server reads from stdin, writes to stdout
+            logger.info("Server starting in STDIO mode...")
+            logger.info("Reading JSON-RPC from stdin, writing responses to stdout")
+
+            # In STDIO mode with persistent wrapper, the wrapper maintains stdin connection
+            # The server simply runs the standard STDIO event loop
+            server.run()
+
+            # If server.run() returns (stdin EOF), exit gracefully
+            logger.info("Server event loop exited (stdin closed)")
 
     except KeyboardInterrupt:
         logger.info("Server shutdown requested by user")
+    except EOFError:
+        # This can happen if stdin is closed (in STDIO mode)
+        logger.info("stdin closed, server exiting...")
     except Exception as e:
-        logger.error(f"Failed to start server: {e}")
+        logger.error(f"Failed to start server: {e}", exc_info=True)
         raise
 
 
