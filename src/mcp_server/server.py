@@ -29,7 +29,7 @@ from fastmcp import FastMCP
 
 from src.config.settings import settings
 
-from .database.connection import get_connection_manager
+from .database import database
 from .security import initialize_security, require_auth
 from .tool_prompts import get_system_instructions, get_tool_prompt
 
@@ -98,20 +98,24 @@ def create_server() -> FastMCP:
     server = FastMCP(name="healthcare-mcp-server", instructions=system_instructions)
 
     # Initialize database connection
-    # Allow server to start even if MongoDB is temporarily unavailable
-    # Tools will handle connection errors when actually called
-    logger.info("Initializing database connection...")
-    db_manager = get_connection_manager()
+    # Motor handles connections lazily - no need to explicitly connect
+    # Just initialize the connection pool configuration
+    logger.info("Initializing Motor database connection pool...")
     try:
-        db_manager.connect()
-        logger.info("Database connection established successfully")
+        database.initialize(
+            connection_uri=settings.mongodb_connection_string,
+            database_name=settings.mongodb_database,
+            min_pool_size=10,
+            max_pool_size=50,
+        )
+        logger.info("Database connection pool initialized successfully")
     except Exception as e:
         logger.warning(
-            f"Database connection failed during initialization: {e}\n"
-            f"Server will start anyway. Tools will attempt to connect when called.\n"
+            f"Database initialization warning: {e}\n"
+            f"Server will start anyway. Motor will attempt to connect when tools are used.\n"
             f"Please ensure MongoDB is running and accessible."
         )
-        # Don't raise - allow server to start and retry connections when tools are used
+        # Don't raise - allow server to start and Motor will handle connections when needed
 
     # Initialize security layer
     if settings.security_enabled:
@@ -143,6 +147,7 @@ def create_server() -> FastMCP:
         birth_date_start: str = None,
         birth_date_end: str = None,
         gender: str = None,
+        race: str = None,
         limit: int = 20,
     ) -> dict[str, Any]:
         try:
@@ -155,6 +160,7 @@ def create_server() -> FastMCP:
                 birth_date_start=birth_date_start,
                 birth_date_end=birth_date_end,
                 gender=gender,
+                race=race,
                 limit=limit,
             )
             # Get security context (validated by @require_auth decorator)
