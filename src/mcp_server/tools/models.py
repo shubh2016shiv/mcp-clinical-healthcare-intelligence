@@ -433,6 +433,7 @@ class MedicationHistoryResponse(BaseModel):
     enriched_with_drug_data: bool = Field(
         ..., description="Whether drug classification was included"
     )
+    message: str | None = Field(None, description="Optional message or debug information")
 
 
 # =============================================================================

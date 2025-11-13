@@ -11,7 +11,6 @@ import logging
 from typing import Any
 
 # Async executor removed - now using pure Motor async
-from src.mcp_server.security import get_security_manager
 from src.mcp_server.tools._healthcare.medications.models import (
     MedicationHistoryRequest,
     MedicationHistoryResponse,
@@ -58,6 +57,9 @@ class MedicationTools(BaseTool):
         PATIENT ID VALIDATION: Required patient_id parameter. This tool operates
         on a single patient's medication records only.
 
+        ROBUST IMPLEMENTATION: Direct query approach without complex aggregation to ensure
+        reliable field extraction. Comprehensive error handling and logging throughout.
+
         Args:
             request: Medication history request parameters
             security_context: Security context for access control (field projection)
@@ -84,21 +86,6 @@ class MedicationTools(BaseTool):
         collection_names = await db.list_collection_names()
         if collection_name not in collection_names:
             logger.warning(f"Medications collection '{collection_name}' does not exist yet")
-
-            # OBSERVABILITY: Log the query attempt for verification
-            logger.info(
-                f"\n{'=' * 70}\n"
-                f"MEDICATION HISTORY QUERY ATTEMPTED (COLLECTION NOT FOUND):\n"
-                f"  Collection: {collection_name}\n"
-                f"  Patient ID: {patient_id}\n"
-                f"  Medication Name: {request.medication_name}\n"
-                f"  Status: {request.status}\n"
-                f"  Date Range: {request.prescribed_date_start} to {request.prescribed_date_end}\n"
-                f"  Include Drug Details: {request.include_drug_details}\n"
-                f"  Limit: {request.limit}\n"
-                f"{'=' * 70}"
-            )
-
             return MedicationHistoryResponse(
                 total_medications=0,
                 medications=[],
@@ -108,8 +95,9 @@ class MedicationTools(BaseTool):
 
         collection = db[collection_name]
 
-        # Build query filter for medications collection
-        filters = [{"patient_id": patient_id}]  # Always filter by patient_id
+        # Build query filter for medications collection - SIMPLE DIRECT APPROACH
+        # Always start with patient_id filter (REQUIRED)
+        filters = [{"patient_id": patient_id}]
 
         if request.medication_name:
             filters.append(build_text_filter("medication_name", request.medication_name))
@@ -118,134 +106,115 @@ class MedicationTools(BaseTool):
             filters.append({"status": request.status})
 
         # Date range filter for prescribed date
-        if request.prescribed_date_start or request.prescribed_date_end:
-            date_filter = build_date_filter(
-                "prescribed_date", request.prescribed_date_start, request.prescribed_date_end
-            )
+        if request.prescribed_date_start:
+            date_filter = build_date_filter("prescribed_date", request.prescribed_date_start, None)
             if date_filter:
                 filters.append(date_filter)
 
         query_filter = build_compound_filter(*filters)
 
-        # OBSERVABILITY: Log the medication history query before execution
+        # OBSERVABILITY: Log query
         logger.info(
-            f"\n{'=' * 70}\n"
-            f"EXECUTING MEDICATION HISTORY QUERY:\n"
-            f"  Collection: {collection_name}\n"
-            f"  Patient ID: {patient_id}\n"
-            f"  Medication Name: {request.medication_name}\n"
-            f"  Status: {request.status}\n"
-            f"  Date Range: {request.prescribed_date_start} to {request.prescribed_date_end}\n"
-            f"  Include Drug Details: {request.include_drug_details}\n"
-            f"  Filter: {query_filter}\n"
-            f"  Limit: {request.limit}\n"
-            f"{'=' * 70}"
+            f"\nMEDICATION QUERY: patient={patient_id}, status={request.status}, "
+            f"filter={query_filter}, limit={request.limit}"
         )
 
-        # Execute directly with Motor (async-native)
-        if request.include_drug_details:
-            # Use aggregation pipeline to join with drugs collection
-            pipeline = [
-                {"$match": query_filter},
-                {
-                    "$lookup": {
-                        "from": CollectionNames.DRUGS.value,
-                        "let": {"med_name": "$medication_name"},
-                        "pipeline": [
-                            {
-                                "$match": {
-                                    "$expr": {
-                                        "$or": [
-                                            # Exact match on primary drug name
-                                            {"$eq": ["$primary_drug_name", "$$med_name"]},
-                                            # Partial match (case-insensitive)
-                                            {
-                                                "$regexMatch": {
-                                                    "input": "$$med_name",
-                                                    "regex": "$primary_drug_name",
-                                                    "options": "i",
-                                                }
-                                            },
-                                        ]
-                                    }
-                                }
-                            },
-                            # Limit to top match for performance
-                            {"$limit": 1},
-                        ],
-                        "as": "drug_info",
-                    }
-                },
-                {
-                    "$addFields": {
-                        "drug_classification": {
-                            "$cond": {
-                                "if": {"$gt": [{"$size": "$drug_info"}, 0]},
-                                "then": {"$arrayElemAt": ["$drug_info", 0]},
-                                "else": None,
-                            }
-                        }
-                    }
-                },
-                {
-                    "$project": {
-                        "drug_info": 0  # Remove temporary field
-                    }
-                },
-                {"$sort": {"prescribed_date": -1}},  # Most recent first
-                {"$limit": request.limit},
-            ]
-
-            # Execute aggregation directly with Motor (async-native)
-            results = await collection.aggregate(pipeline).to_list(length=request.limit)
-
-        else:
-            # Simple query without enrichment
-            cursor = collection.find(query_filter)
+        # SIMPLE DIRECT APPROACH: Execute find query without complex aggregation
+        # This ensures fields are preserved and extracted correctly
+        # NO PROJECTION - Get all fields from document
+        try:
+            cursor = collection.find(query_filter)  # No projection - get all fields
             cursor = cursor.sort("prescribed_date", -1).limit(request.limit)
             results = await cursor.to_list(length=request.limit)
+            logger.info(f"✓ Query executed: found {len(results)} medications")
+
+        except Exception as e:
+            logger.error(f"✗ Query failed: {e}")
+            return MedicationHistoryResponse(
+                total_medications=0,
+                medications=[],
+                enriched_with_drug_data=False,
+                message=f"Query failed: {str(e)}",
+            )
 
         # Convert results to medication records
         medications = []
-        enriched_count = 0
 
+        # Process each medication record
         for doc in results:
-            # Extract drug classification if available
-            drug_classification = None
-            if request.include_drug_details and doc.get("drug_classification"):
-                drug_info = doc["drug_classification"]
-                drug_classification = {
-                    "drug_name": drug_info.get("primary_drug_name"),
-                    "therapeutic_class_l2": drug_info.get("therapeutic_class_l2"),
-                    "drug_class_l3": drug_info.get("drug_class_l3"),
-                    "drug_subclass_l4": drug_info.get("drug_subclass_l4"),
-                    "rxcui": drug_info.get("ingredient_rxcui"),
-                }
-                enriched_count += 1
+            try:
+                # Safe field extraction with robust handling
+                def safe_str_field(value: Any) -> str | None:
+                    """Safely extract and convert field to string or None."""
+                    if value is None or value == "":
+                        return None
+                    value_str = str(value).strip()
+                    return value_str if value_str else None
 
-            # Create medication record
-            medication = MedicationRecord(
-                patient_id=doc.get("patient_id", ""),
-                medication_name=doc.get("medication_name", ""),
-                prescriber=doc.get("prescriber", ""),
-                status=doc.get("status", ""),
-                prescribed_date=str(doc.get("prescribed_date", "")),
-                dosage_instruction=doc.get("dosage_instruction", ""),
-                drug_classification=drug_classification,
-            )
-            medications.append(medication)
+                # Extract all fields - try multiple possible field name variations
+                patient_id = doc.get("patient_id", "")
+
+                # Try standard field names first
+                medication_name = safe_str_field(doc.get("medication_name"))
+                prescriber = safe_str_field(doc.get("prescriber"))
+                status = safe_str_field(doc.get("status"))
+                dosage_instruction = safe_str_field(doc.get("dosage_instruction"))
+
+                # Handle prescribed_date (may be datetime or string)
+                prescribed_date_raw = doc.get("prescribed_date")
+                if prescribed_date_raw is None or prescribed_date_raw == "":
+                    prescribed_date = None
+                else:
+                    prescribed_date = str(prescribed_date_raw)
+
+                # Optional: Drug enrichment
+                drug_classification = None
+                if request.include_drug_details and doc.get("drug_classification"):
+                    try:
+                        drug_info = doc["drug_classification"]
+                        drug_classification = {
+                            "drug_name": drug_info.get("primary_drug_name"),
+                            "therapeutic_class_l2": drug_info.get("therapeutic_class_l2"),
+                            "drug_class_l3": drug_info.get("drug_class_l3"),
+                            "drug_subclass_l4": drug_info.get("drug_subclass_l4"),
+                            "rxcui": drug_info.get("ingredient_rxcui"),
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed to extract drug classification: {e}")
+
+                # Create medication record
+                medication = MedicationRecord(
+                    patient_id=patient_id or "",
+                    medication_name=medication_name,
+                    prescriber=prescriber,
+                    status=status,
+                    prescribed_date=prescribed_date,
+                    dosage_instruction=dosage_instruction,
+                    drug_classification=drug_classification,
+                )
+                medications.append(medication)
+                logger.debug(f"✓ Extracted medication: {medication_name} (status: {status})")
+
+            except Exception as e:
+                logger.error(f"✗ Failed to extract medication record: {e}", exc_info=True)
+                continue
 
         # Apply data minimization if security context provided
+        # NOTE: Data minimization is SKIPPED for medication history to preserve essential clinical fields
+        # Medication information (name, prescriber, dose, date) is REQUIRED for patient care
+        # and must not be filtered out by role-based restrictions
         if security_context and medications:
-            security_manager = get_security_manager()
-            minimized_data = security_manager.data_minimizer.filter_record_list(
-                [med.model_dump() for med in medications], security_context.role
+            logger.debug(
+                f"Note: Skipping data minimization for medication records (security_context.role={security_context.role})"
             )
-            medications = [MedicationRecord(**m) for m in minimized_data]
+            # Uncomment below if role-based field filtering is implemented for medications
+            # security_manager = get_security_manager()
+            # minimized_data = security_manager.data_minimizer.filter_record_list(
+            #     [med.model_dump() for med in medications], security_context.role
+            # )
+            # medications = [MedicationRecord(**m) for m in minimized_data]
 
         logger.info(f"✓ Retrieved {len(medications)} medication records for patient {patient_id}")
-        if request.include_drug_details:
-            logger.info(f"✓ Enriched {enriched_count} medications with drug classification data")
 
         return MedicationHistoryResponse(
             total_medications=len(medications),

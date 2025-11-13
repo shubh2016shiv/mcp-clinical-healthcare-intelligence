@@ -74,6 +74,7 @@ class DataMinimizer:
                 "onset_date",
                 "severity",
                 "medication_name",
+                "prescriber",  # Added: Required for medication history
                 "dosage_instruction",
                 "prescribed_date",
                 "test_name",
