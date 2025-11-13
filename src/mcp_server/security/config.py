@@ -83,6 +83,8 @@ class SecurityConfig(BaseModel):
             "last_name",
             "city",
             "state",
+            "address.city",  # Nested address fields for patient search
+            "address.state",  # Nested address fields for patient search
             "birth_date",
             "gender",
             "medication_name",

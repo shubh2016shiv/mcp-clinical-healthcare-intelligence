@@ -5,12 +5,10 @@ all cache implementations, similar to ConnectionManager pattern used for MongoDB
 """
 
 import logging
-import threading
 from typing import Any, Optional
 
 try:
     import redis
-    from redis.connection import ConnectionPool
     from redis.exceptions import ConnectionError, RedisError
 
     REDIS_AVAILABLE = True
@@ -18,16 +16,13 @@ except ImportError:
     REDIS_AVAILABLE = False
     # Create dummy types for type hints when redis is not available
     redis = None  # type: ignore
-    ConnectionPool = None  # type: ignore
     ConnectionError = Exception  # type: ignore
     RedisError = Exception  # type: ignore
 
 from src.config.settings import settings
 
 from .aggregation_cache import AggregationCache
-from .field_schema_cache import FieldSchemaCache
 from .prompt_cache import PromptCache
-from .rbac_cache import RBACCache
 from .session_cache import SessionCache
 
 logger = logging.getLogger(__name__)
@@ -41,27 +36,22 @@ class CacheManager:
     graceful fallback when Redis is unavailable.
 
     Attributes:
-        rbac_cache: RBAC decision cache
         session_cache: Session management cache
         prompt_cache: Tool prompt cache
-        field_schema_cache: Data minimization schema cache
         aggregation_cache: Analytics result cache
     """
 
     _instance: Optional["CacheManager"] = None
-    _lock: threading.Lock = threading.Lock()
+    _initialized: bool = False
 
     def __new__(cls) -> "CacheManager":
-        """Implement singleton pattern with thread-safe instantiation.
+        """Implement simple singleton pattern.
 
         Returns:
             The single CacheManager instance for the application
         """
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
+            cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self) -> None:
@@ -70,12 +60,12 @@ class CacheManager:
         Sets up Redis connection and initializes all cache components.
         Called automatically but guards against re-initialization.
         """
-        if self._initialized:
+        if CacheManager._initialized:
             return
+        CacheManager._initialized = True
 
         self._redis_client: Any | None = None  # type: ignore
         self._available: bool = False
-        self._initialized = True
 
         # Initialize Redis connection if enabled and available
         if settings.redis_enabled and REDIS_AVAILABLE:
@@ -95,113 +85,39 @@ class CacheManager:
         )
 
     def _initialize_redis(self) -> None:
-        """Initialize Redis connection with connection pooling.
+        """Initialize Redis connection.
 
-        Handles SSL configuration robustly across different redis-py versions.
-        Gracefully falls back if SSL configuration is incompatible with the installed version.
+        Uses redis.from_url() for simple, protocol-based SSL handling.
+        Gracefully falls back if connection fails.
         """
         if not REDIS_AVAILABLE:
             logger.warning("Redis package not available, cannot initialize Redis connection")
             self._available = False
-            self._redis_client = None
             return
 
         try:
-            # Detect redis-py version for compatibility handling
-            redis_version = getattr(redis, "__version__", "0.0.0")
-            version_major = int(redis_version.split(".")[0]) if redis_version else 0
+            # Build connection URL with protocol-based SSL (rediss:// = SSL, redis:// = no SSL)
+            protocol = "rediss" if settings.redis_ssl else "redis"
+            auth_part = f":{settings.redis_password}@" if settings.redis_password else ""
+            redis_url = f"{protocol}://{auth_part}{settings.redis_host}:{settings.redis_port}"
 
-            # For redis-py v5.0+, use from_url which handles SSL via protocol
-            # For redis-py v4.x, use ConnectionPool with ssl parameter
-            if version_major >= 5 and settings.redis_ssl:
-                # Use URL-based connection for SSL (recommended for v5+)
-                protocol = "rediss"  # rediss:// indicates SSL/TLS
-                auth_part = f":{settings.redis_password}@" if settings.redis_password else ""
-                redis_url = f"{protocol}://{auth_part}{settings.redis_host}:{settings.redis_port}"
-
-                self._redis_client = redis.from_url(
-                    redis_url,
-                    socket_connect_timeout=settings.redis_socket_timeout,
-                    socket_timeout=settings.redis_socket_timeout,
-                    max_connections=settings.redis_max_connections,
-                    decode_responses=True,
-                )
-            else:
-                # Use ConnectionPool for non-SSL or redis-py v4.x
-                connection_params = {
-                    "host": settings.redis_host,
-                    "port": settings.redis_port,
-                    "socket_connect_timeout": settings.redis_socket_timeout,
-                    "socket_timeout": settings.redis_socket_timeout,
-                    "max_connections": settings.redis_max_connections,
-                    "decode_responses": True,
-                }
-
-                # Add password only if provided
-                if settings.redis_password:
-                    connection_params["password"] = settings.redis_password
-
-                # Add SSL parameter only for redis-py v4.x when SSL is enabled
-                if settings.redis_ssl and version_major < 5:
-                    connection_params["ssl"] = True
-
-                # Create connection pool
-                pool = ConnectionPool(**connection_params)
-                self._redis_client = redis.Redis(connection_pool=pool)  # type: ignore
+            # Connect using URL-based method (works across redis-py versions)
+            self._redis_client = redis.from_url(
+                redis_url,
+                socket_connect_timeout=settings.redis_socket_timeout,
+                socket_timeout=settings.redis_socket_timeout,
+                max_connections=settings.redis_max_connections,
+                decode_responses=True,
+            )
 
             # Test connection
             self._redis_client.ping()
             self._available = True
 
             ssl_status = "with SSL" if settings.redis_ssl else "without SSL"
-            connection_method = (
-                "URL-based" if (version_major >= 5 and settings.redis_ssl) else "ConnectionPool"
-            )
             logger.info(
-                f"Connected to Redis at {settings.redis_host}:{settings.redis_port} {ssl_status} (redis-py {redis_version}, {connection_method})"
+                f"Connected to Redis at {settings.redis_host}:{settings.redis_port} {ssl_status}"
             )
-
-        except TypeError as e:
-            # Handle SSL parameter incompatibility
-            if "ssl" in str(e).lower() or "unexpected keyword argument" in str(e).lower():
-                logger.warning(
-                    f"Redis SSL configuration incompatible with installed redis-py version: {e}"
-                )
-                logger.info("Retrying Redis connection without SSL parameter...")
-
-                # Retry without SSL parameter - build connection URL instead
-                try:
-                    protocol = "rediss" if settings.redis_ssl else "redis"
-                    auth_part = f":{settings.redis_password}@" if settings.redis_password else ""
-                    redis_url = (
-                        f"{protocol}://{auth_part}{settings.redis_host}:{settings.redis_port}"
-                    )
-
-                    # Use from_url which handles SSL automatically via protocol
-                    self._redis_client = redis.from_url(
-                        redis_url,
-                        socket_connect_timeout=settings.redis_socket_timeout,
-                        socket_timeout=settings.redis_socket_timeout,
-                        max_connections=settings.redis_max_connections,
-                        decode_responses=True,
-                    )
-
-                    # Test connection
-                    self._redis_client.ping()
-                    self._available = True
-
-                    ssl_status = "with SSL" if settings.redis_ssl else "without SSL"
-                    logger.info(
-                        f"Connected to Redis at {settings.redis_host}:{settings.redis_port} {ssl_status} (via URL)"
-                    )
-                except Exception as retry_error:
-                    logger.error(f"Failed to connect to Redis after SSL retry: {retry_error}")
-                    logger.warning("Continuing without Redis cache (performance degraded)")
-                    self._available = False
-                    self._redis_client = None
-            else:
-                # Re-raise if it's a different TypeError
-                raise
 
         except (ConnectionError, RedisError) as e:
             logger.warning(f"Failed to connect to Redis: {e}")
@@ -210,17 +126,15 @@ class CacheManager:
             self._redis_client = None
 
         except Exception as e:
-            logger.error(f"Unexpected error initializing Redis: {e}", exc_info=True)
+            logger.error(f"Error initializing Redis: {e}")
             self._available = False
             self._redis_client = None
 
     def _initialize_caches(self) -> None:
         """Initialize all cache components."""
         # Initialize caches with Redis client (or None if unavailable)
-        self.rbac_cache = RBACCache(self._redis_client)
         self.session_cache = SessionCache(self._redis_client)
         self.prompt_cache = PromptCache(self._redis_client)
-        self.field_schema_cache = FieldSchemaCache(self._redis_client)
         self.aggregation_cache = AggregationCache(self._redis_client)
 
     def is_available(self) -> bool:

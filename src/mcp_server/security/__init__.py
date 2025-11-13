@@ -20,7 +20,7 @@ HIPAA/Healthcare-Specific Considerations:
 - Read-only operations: MCP servers never modify data
 
 Security Best Practice: MCP servers are read-only by design. This reduces
-attack surface, ensures data integrity, and follows the principle of least
+attack surface, ensures data server_health_checks, and follows the principle of least
 privilege. All data modifications must occur through separate, secured APIs.
 
 This module provides:

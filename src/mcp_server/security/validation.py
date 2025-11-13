@@ -149,7 +149,7 @@ class InputValidator:
         """Validate patient ID format
 
         Rationale: Patient IDs are high-risk inputs that appear in many queries.
-        Strict validation prevents injection and ensures data integrity.
+        Strict validation prevents injection and ensures data server_health_checks.
         Only allows safe alphanumeric characters.
 
         Args:

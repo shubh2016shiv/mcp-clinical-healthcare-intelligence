@@ -43,7 +43,7 @@ class UserRole(str, Enum):
     - READ_ONLY: Limited read access with minimal fields
 
     Security Note: MCP servers are read-only by design. No write operations
-    are permitted to ensure data integrity and reduce attack surface.
+    are permitted to ensure data server_health_checks and reduce attack surface.
     All roles have read-only permissions following the principle of least privilege.
     """
 
@@ -270,6 +270,15 @@ class AuthenticationManager:
         Returns:
             SecurityContext or None if invalid
         """
+        # Validate input parameters
+        if not session_id or not isinstance(session_id, str):
+            self.logger.warning("Invalid session_id provided to validate_session")
+            return None
+
+        if not ip_address or not isinstance(ip_address, str):
+            self.logger.warning("Invalid ip_address provided to validate_session")
+            return None
+
         # Check local cache first
         context = self.sessions.get(session_id)
 
@@ -281,22 +290,34 @@ class AuthenticationManager:
                     # Reconstruct SecurityContext from cached data
                     from datetime import datetime as dt
 
-                    context_data["authenticated_at"] = dt.fromisoformat(
-                        context_data["authenticated_at"]
-                    )
-                    context = SecurityContext(**context_data)
-                    # Update local cache for next lookup
-                    self.sessions[session_id] = context
+                    try:
+                        context_data["authenticated_at"] = dt.fromisoformat(
+                            context_data["authenticated_at"]
+                        )
+                        context = SecurityContext(**context_data)
+                        # Update local cache for next lookup
+                        self.sessions[session_id] = context
+                    except (ValueError, TypeError) as e:
+                        self.logger.error(f"Failed to reconstruct session from cache: {e}")
+                        # Remove corrupted session from cache
+                        self._session_cache.delete_session(session_id)
+                        return None
             except Exception as e:
                 self.logger.debug(f"Failed to retrieve session from Redis: {e}")
 
         if not context:
-            self.logger.warning(f"Invalid session attempted: {session_id}")
+            self.logger.warning(f"Invalid session attempted: {session_id[:8]}...")
             return None
 
         # Check session timeout
-        if context.is_expired(self.config.session_timeout_minutes):
-            self.logger.warning(f"Expired session: {session_id}")
+        try:
+            if context.is_expired(self.config.session_timeout_minutes):
+                self.logger.warning(f"Expired session: {session_id[:8]}...")
+                self._delete_session_from_stores(session_id)
+                return None
+        except Exception as e:
+            self.logger.error(f"Error checking session expiration: {e}")
+            # On error, treat as expired for security
             self._delete_session_from_stores(session_id)
             return None
 
@@ -306,7 +327,7 @@ class AuthenticationManager:
             self.logger.critical(
                 "Possible session hijacking detected",
                 extra={
-                    "session_id": session_id,
+                    "session_id": session_id[:8] + "...",  # Don't log full session ID
                     "original_ip": context.ip_address,
                     "request_ip": ip_address,
                 },

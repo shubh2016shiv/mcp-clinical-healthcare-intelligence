@@ -40,19 +40,6 @@ class DataMinimizer:
     def __init__(self):
         """Initialize data minimizer with role-based field permissions"""
 
-        # Initialize Redis field schema cache if available
-        self._field_schema_cache = None
-        try:
-            from src.mcp_server.cache import get_cache_manager
-
-            cache_manager = get_cache_manager()
-            if cache_manager.is_available():
-                self._field_schema_cache = cache_manager.field_schema_cache
-        except Exception as e:
-            import logging
-
-            logging.getLogger(__name__).debug(f"Field schema cache not available: {e}")
-
         # Define field permissions for each role
         # These mappings implement the principle of least privilege
         self.role_field_permissions: dict[UserRole, set[str] | None] = {
@@ -369,8 +356,8 @@ class DataMinimizer:
 
         Rationale: Expose field permissions for validation and documentation.
         Useful for API documentation and client applications.
-
-        Uses Redis cache for performance optimization on repeated lookups.
+        Field permissions are stored in-memory as Python dicts and are static,
+        so caching them in Redis provides no real benefit.
 
         Args:
             role: User role
@@ -378,30 +365,7 @@ class DataMinimizer:
         Returns:
             Set of allowed field names, or None for all fields
         """
-        # Try to get from Redis cache first
-        if self._field_schema_cache:
-            try:
-                cached_schema = self._field_schema_cache.get_role_schema(role.value)
-                if cached_schema is not None:
-                    return cached_schema
-            except Exception as e:
-                import logging
-
-                logging.getLogger(__name__).debug(f"Failed to get schema from cache: {e}")
-
-        # Get from memory and cache in Redis
-        allowed_fields = self.role_field_permissions.get(role)
-
-        # Cache in Redis for future lookups
-        if allowed_fields is not None and self._field_schema_cache:
-            try:
-                self._field_schema_cache.cache_role_schema(role.value, allowed_fields)
-            except Exception as e:
-                import logging
-
-                logging.getLogger(__name__).debug(f"Failed to cache schema in Redis: {e}")
-
-        return allowed_fields
+        return self.role_field_permissions.get(role)
 
     def validate_field_access(self, field: str, role: UserRole, operation: str = "read") -> bool:
         """Validate if a field can be accessed by a role (read-only)
