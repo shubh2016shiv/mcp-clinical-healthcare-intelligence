@@ -260,7 +260,8 @@ class AggregationBuilderTools(BaseTool):
         db = self.get_database()
 
         # Validation: Check collection exists
-        if collection_name not in db.list_collection_names():
+        collection_names = await db.list_collection_names()
+        if collection_name not in collection_names:
             logger.warning(f"Collection '{collection_name}' does not exist")
             return {
                 "success": False,

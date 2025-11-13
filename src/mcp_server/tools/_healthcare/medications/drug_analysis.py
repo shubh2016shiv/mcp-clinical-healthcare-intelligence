@@ -62,7 +62,8 @@ class DrugAnalysisTools(BaseTool):
 
         # Check if drugs collection exists
         collection_name = CollectionNames.DRUGS.value
-        if collection_name not in db.list_collection_names():
+        collection_names = await db.list_collection_names()
+        if collection_name not in collection_names:
             logger.warning(f"Drugs collection '{collection_name}' does not exist yet")
 
             # OBSERVABILITY: Log the search attempt for verification
@@ -167,7 +168,8 @@ class DrugAnalysisTools(BaseTool):
 
         # Check if drugs collection exists
         collection_name = CollectionNames.DRUGS.value
-        if collection_name not in db.list_collection_names():
+        collection_names = await db.list_collection_names()
+        if collection_name not in collection_names:
             logger.warning(f"Drugs collection '{collection_name}' does not exist yet")
 
             return DrugClassAnalysisResponse(

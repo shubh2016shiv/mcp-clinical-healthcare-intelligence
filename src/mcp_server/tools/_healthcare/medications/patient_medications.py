@@ -81,7 +81,8 @@ class MedicationTools(BaseTool):
 
         # Check if medications collection exists
         collection_name = CollectionNames.MEDICATIONS.value
-        if collection_name not in db.list_collection_names():
+        collection_names = await db.list_collection_names()
+        if collection_name not in collection_names:
             logger.warning(f"Medications collection '{collection_name}' does not exist yet")
 
             # OBSERVABILITY: Log the query attempt for verification
