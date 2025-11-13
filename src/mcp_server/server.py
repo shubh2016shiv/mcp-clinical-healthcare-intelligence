@@ -168,7 +168,17 @@ def create_server() -> FastMCP:
 
             security_context = get_security_context()
 
+            # Add debug info before calling
+            from src.mcp_server.database import database as db_module
+
+            db_name = db_module.get_database_name()
+            logger.error(f"[DEBUG] About to call search_patients, database: {db_name}")
+
             result = await patient_tools.search_patients(request, security_context)
+
+            logger.error(
+                f"[DEBUG] search_patients returned: type={type(result)}, length={len(result) if isinstance(result, list) else 'N/A'}"
+            )
 
             # Handle ErrorResponse from decorator
             if isinstance(result, ErrorResponse):
@@ -195,7 +205,21 @@ def create_server() -> FastMCP:
                     logger.error(f"Failed to serialize patient: {e}, type: {type(patient)}")
                     continue
 
-            return {"patients": patients, "count": len(patients)}
+            # Add diagnostic info to help debug
+            from src.mcp_server.database import database as db_module
+
+            diagnostic_info = {
+                "database_name": db_module.get_database_name(),
+                "result_type": type(result).__name__,
+                "result_length": len(result) if isinstance(result, list) else "N/A",
+            }
+
+            response = {
+                "patients": patients,
+                "count": len(patients),
+                "_diagnostic": diagnostic_info,
+            }
+            return response
         except Exception as e:
             logger.error(f"Error in search_patients: {e}")
             return ErrorResponse(
@@ -245,6 +269,7 @@ def create_server() -> FastMCP:
     @require_auth()  # Access determined by required collections
     @with_centralized_prompt("analyze_conditions")
     async def analyze_conditions(
+        patient_id: str = None,
         condition_name: str = None,
         status: str = None,
         onset_date_start: str = None,
@@ -254,6 +279,7 @@ def create_server() -> FastMCP:
     ) -> dict[str, Any]:
         try:
             request = ConditionAnalysisRequest(
+                patient_id=patient_id,
                 condition_name=condition_name,
                 status=status,
                 onset_date_start=onset_date_start,

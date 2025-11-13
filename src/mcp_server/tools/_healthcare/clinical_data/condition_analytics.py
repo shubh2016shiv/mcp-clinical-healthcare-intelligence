@@ -165,12 +165,20 @@ class ConditionAnalyticsTools(BaseTool):
                 records.append(record)
 
             # Apply data minimization for individual records
+            # IMPORTANT: Data minimization must preserve condition fields for tool functionality.
+            # Required fields: condition_name, status, onset_date, verification_status
+            # These fields must be included in the role's field permissions (see data_minimization.py).
+            # Without these fields, queries return null values even when data exists in the database.
+            # Enterprise practice: Field permissions should be validated through integration tests
+            # to ensure required fields are not filtered out, preventing silent data loss.
             if security_context:
                 security_manager = get_security_manager()
                 minimized_records = security_manager.data_minimizer.filter_record_list(
                     [record.model_dump() for record in records], security_context.role
                 )
                 # Convert back to ConditionRecord objects
+                # Note: If fields were filtered out, ConditionRecord will have null values
+                # which indicates a field permission configuration issue.
                 records = [ConditionRecord(**record_dict) for record_dict in minimized_records]
 
             return ConditionAnalysisResponse(

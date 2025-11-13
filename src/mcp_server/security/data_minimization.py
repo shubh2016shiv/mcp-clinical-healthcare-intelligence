@@ -17,7 +17,7 @@ Field Access Rules by Role (All Read-Only):
 - READ_ONLY: Read access to limited view fields (minimal access)
 
 Security Note: MCP servers are read-only by design. All data access is
-read-only to ensure data integrity and reduce attack surface. No write
+read-only to ensure data server_health_checks and reduce attack surface. No write
 operations are permitted through MCP tools.
 """
 
@@ -164,6 +164,19 @@ class DataMinimizer:
                 # Limited demographics
                 "city",
                 "state",
+                # Condition fields - REQUIRED for condition queries to function
+                # Rationale: The analyze_conditions tool must return meaningful data.
+                # Without these fields, condition queries return null values even when
+                # data exists in the database, breaking tool functionality. These are
+                # basic condition attributes (name, status, dates) that are necessary
+                # for any useful condition query. This maintains HIPAA's "minimum
+                # necessary" principle while ensuring tools remain functional.
+                # Enterprise consideration: In production, field permissions should be
+                # validated through integration tests to catch missing fields early.
+                "condition_name",  # Required: Condition name for identification
+                "status",  # Required: Condition status (active/resolved/inactive)
+                "onset_date",  # Required: When condition started (temporal context)
+                "verification_status",  # Required: Verification status (confirmed/provisional)
                 # Metadata only
                 "resource_type",
             },

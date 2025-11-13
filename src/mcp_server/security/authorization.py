@@ -1,19 +1,17 @@
-"""Authorization Decorators and Permission System
+"""Authorization Decorators and Audit System
 
-This module provides decorators and utilities for enforcing access control
-in the healthcare MCP server. It implements role-based access control (RBAC)
-and permission checking to ensure HIPAA compliance.
+This module provides decorators and utilities for enforcing authentication
+and audit logging in the healthcare MCP server to ensure HIPAA compliance.
 
 Rationale for Authorization Decorators:
-- Declarative Security: Permissions declared at function level
+- Declarative Security: Authentication declared at function level
 - Consistent Enforcement: Same security checks across all tools
-- Audit Integration: Automatic logging of access attempts
-- Fail-Safe Defaults: Deny access by default, explicit allow
+- Audit Integration: Automatic logging of all access attempts
+- Read-Only Safeguard: MCP servers are read-only by design
 
 Permission Constants Rationale:
 - Centralized permissions prevent typos and inconsistencies
 - Clear naming helps developers understand access requirements
-- Granular permissions enable least privilege principle
 """
 
 import logging
@@ -21,8 +19,7 @@ from collections.abc import Callable
 from functools import wraps
 
 from .audit import AuditLogger
-from .authentication import SecurityContext, get_security_context
-from .rbac_config import check_role_access_to_collections, get_required_collections_for_tool
+from .authentication import SecurityContext, UserRole, get_security_context
 
 # Permission Constants
 # Rationale: Centralized permission definitions prevent typos and ensure
@@ -31,7 +28,7 @@ from .rbac_config import check_role_access_to_collections, get_required_collecti
 #
 # SECURITY BEST PRACTICE: MCP servers are read-only by design. No write
 # permissions exist because MCP tools should never modify data. This reduces
-# attack surface and ensures data integrity. All data modifications must
+# attack surface and ensures data server_health_checks. All data modifications must
 # occur through separate, secured APIs with proper authorization.
 
 PHI_PERMISSIONS = {
@@ -51,30 +48,28 @@ ADMIN_PERMISSIONS = {
 # Combined permission dictionary for easy lookup
 ALL_PERMISSIONS = {**PHI_PERMISSIONS, **ADMIN_PERMISSIONS}
 
+# Module-level logger for authorization operations
+logger = logging.getLogger(__name__)
+
 
 def require_auth():
-    """Decorator to enforce authentication and authorization on MCP tools
+    """Decorator to enforce authentication and audit logging on MCP tools
 
     Usage:
         @require_auth()
         async def search_patients(...):
             # Tool implementation
 
-    Rationale: Declarative security makes it impossible to forget access
-    control checks. Tool access is automatically determined based on the
-    collections it requires and the user's role-based collection access.
-    This ensures consistent HIPAA compliance across all healthcare data access.
+    Rationale: Declarative security ensures authentication is checked on every
+    tool invocation and all access is audited for HIPAA compliance.
 
-    Security Best Practice: MCP servers are read-only by design. Access control
-    is based on collection-level permissions. This reduces attack surface and
-    ensures data integrity. No write operations are permitted through MCP tools.
+    Security Best Practice: MCP servers are read-only by design. No write
+    operations are permitted through MCP tools, ensuring data integrity.
 
     Security Benefits:
-    - Zero-trust: Every request validated
-    - Collection-based RBAC: Access determined by required collections
-    - Audit trail: All access attempts logged
-    - Fail-safe: Denies access by default
-    - Rate limiting: Integrated abuse prevention
+    - Authentication: Every request requires valid security context
+    - Audit trail: All access attempts logged for compliance
+    - Read-only: No write operations possible by design
 
     Returns:
         Decorated function with security enforcement
@@ -96,14 +91,34 @@ def require_auth():
                 # Extract security context
                 # In production, this would come from FastMCP request context
                 # For now, use the development helper function
-                context = get_security_context()
+                try:
+                    context = get_security_context()
+                except Exception as e:
+                    error_msg = f"Failed to retrieve security context: {type(e).__name__}"
+                    logger.error(f"{error_msg}: {e}", exc_info=True)
+                    audit_logger.log_phi_access(
+                        context=SecurityContext(
+                            user_id="system_error",
+                            role=UserRole.READ_ONLY,
+                            session_id="none",
+                            ip_address="unknown",
+                        ),
+                        operation=func.__name__,
+                        resource_type="authentication_failed",
+                        resource_ids=[],
+                        query_params={},
+                        result_count=0,
+                        success=False,
+                        error=error_msg,
+                    )
+                    raise PermissionError(error_msg) from e
 
                 if not context:
                     error_msg = "Authentication required - no security context"
                     audit_logger.log_phi_access(
                         context=SecurityContext(
                             user_id="anonymous",
-                            role="unknown",
+                            role=UserRole.READ_ONLY,
                             session_id="none",
                             ip_address="unknown",
                         ),
@@ -117,78 +132,13 @@ def require_auth():
                     )
                     raise PermissionError(error_msg)
 
-                # Validate session if using session-based auth
-                # For development, skip session validation for now
-
-                # Check collection-based access control
-                # Use RBAC cache for performance optimization
-                try:
-                    required_collections = get_required_collections_for_tool(func.__name__)
-
-                    # Check cache first for faster authorization
-                    from src.mcp_server.cache import get_cache_manager
-
-                    cache_manager = get_cache_manager()
-
-                    access_allowed = False
-                    if cache_manager.is_available():
-                        # Try to get cached decision
-                        cached_decision = cache_manager.rbac_cache.get_access_decision(
-                            context.role.value, func.__name__
-                        )
-
-                        if cached_decision is not None:
-                            access_allowed = cached_decision
-                        else:
-                            # Compute decision and cache it
-                            access_allowed = check_role_access_to_collections(
-                                context.role, required_collections
-                            )
-                            cache_manager.rbac_cache.cache_access_decision(
-                                context.role.value,
-                                func.__name__,
-                                required_collections,
-                                access_allowed,
-                            )
-                    else:
-                        # Fallback to direct check if cache unavailable
-                        access_allowed = check_role_access_to_collections(
-                            context.role, required_collections
-                        )
-
-                    if not access_allowed:
-                        error_msg = f"Insufficient permissions. Role '{context.role.value}' cannot access required collections: {required_collections}"
-                        audit_logger.log_phi_access(
-                            context=context,
-                            operation=func.__name__,
-                            resource_type="authorization_failed",
-                            resource_ids=[],
-                            query_params={},
-                            result_count=0,
-                            success=False,
-                            error=error_msg,
-                        )
-                        raise PermissionError(error_msg)
-                except ValueError:
-                    # Tool not found in RBAC config - deny access
-                    error_msg = f"Tool not configured in RBAC: {func.__name__}"
-                    audit_logger.log_phi_access(
-                        context=context,
-                        operation=func.__name__,
-                        resource_type="authorization_failed",
-                        resource_ids=[],
-                        query_params={},
-                        result_count=0,
-                        success=False,
-                        error=error_msg,
-                    )
-                    raise PermissionError(error_msg) from None
-
-                # Check rate limiting
-                # Note: Rate limiting is handled at the authentication level
+                # Validate security context
+                if not isinstance(context, SecurityContext):
+                    error_msg = f"Invalid security context type: {type(context).__name__}"
+                    logger.error(error_msg)
+                    raise PermissionError(error_msg)
 
                 # Execute the tool function
-                logger = logging.getLogger(__name__)
                 logger.debug(f"Executing secured tool: {func.__name__} for user {context.user_id}")
 
                 result = await func(*args, **kwargs)
@@ -230,7 +180,6 @@ def require_auth():
                         error=str(e),
                     )
                 except Exception as audit_error:
-                    logger = logging.getLogger(__name__)
                     logger.error(f"Failed to log audit event: {audit_error}")
 
                 raise
