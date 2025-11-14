@@ -44,6 +44,21 @@ from .prompts import (
     get_system_prompt,
 )
 
+# Optional conversation management (for stateful conversations)
+try:
+    from .conversation import (
+        ConversationManager,
+        ConversationMessage,
+        ConversationSession,
+        InMemorySessionStore,
+        RedisSessionStore,
+        SessionStore,
+    )
+
+    CONVERSATION_AVAILABLE = True
+except ImportError:
+    CONVERSATION_AVAILABLE = False
+
 __all__ = [
     # Orchestrator
     "MCPAgentOrchestrator",
@@ -66,3 +81,16 @@ __all__ = [
     "get_query_template",
     "format_query",
 ]
+
+# Add conversation components if available
+if CONVERSATION_AVAILABLE:
+    __all__.extend(
+        [
+            "ConversationManager",
+            "ConversationMessage",
+            "ConversationSession",
+            "SessionStore",
+            "InMemorySessionStore",
+            "RedisSessionStore",
+        ]
+    )

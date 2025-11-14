@@ -154,6 +154,69 @@ class AgentConfig(BaseSettings):
     )
 
     # ========================================================================
+    # Agent Type and Memory Configuration
+    # ========================================================================
+
+    agent_type: str = Field(
+        default="function",
+        description="Agent type: 'function' for stateless, 'react' for conversational with memory",
+    )
+
+    agent_memory_enabled: bool = Field(
+        default=True,
+        description="Enable memory for conversational agents (ReActAgent)",
+    )
+
+    agent_memory_token_limit: int = Field(
+        default=4096,
+        description="Token limit for agent's conversation memory",
+        ge=1024,
+        le=32000,
+    )
+
+    agent_max_iterations: int = Field(
+        default=10,
+        description="Maximum iterations for ReActAgent reasoning loop",
+        ge=1,
+        le=50,
+    )
+
+    # ========================================================================
+    # Session Management Configuration
+    # ========================================================================
+
+    session_persistence_type: str = Field(
+        default="in_memory",
+        description="Session persistence: 'in_memory' (default) or 'redis' (enterprise)",
+    )
+
+    session_redis_url: str | None = Field(
+        default=None,
+        description="Redis URL for session persistence (e.g., 'redis://localhost:6379/0')",
+    )
+
+    session_ttl_seconds: int = Field(
+        default=3600,
+        description="Session time-to-live in seconds (1 hour default)",
+        ge=60,
+        le=86400,
+    )
+
+    session_cleanup_interval_seconds: int = Field(
+        default=600,
+        description="Interval for cleaning up expired sessions (10 minutes default)",
+        ge=60,
+        le=3600,
+    )
+
+    session_max_history_messages: int = Field(
+        default=50,
+        description="Maximum messages to keep in session history",
+        ge=5,
+        le=200,
+    )
+
+    # ========================================================================
     # Concurrency Configuration
     # ========================================================================
 
