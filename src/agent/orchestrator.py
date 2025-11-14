@@ -1,10 +1,10 @@
-"""MCP Agent Orchestrator - Corrected for FunctionAgent.run().
+"""MCP Agent Orchestrator - Fully Simplified (No Custom Conversation Module).
 
-Key corrections:
-1. FunctionAgent.run() is already async - just await it
-2. It returns a dict with 'response' key, not a string directly
-3. ReActAgent uses .chat() / .achat() (different API)
-4. Removed incorrect aquery/achat references
+Key simplifications:
+1. Uses LlamaIndex's native ChatMemoryBuffer for conversation management
+2. Removed custom ConversationManager, Session, and Persistence modules
+3. Session management handled by LlamaIndex's chat stores (in-memory or Redis)
+4. Cleaner, more maintainable, and leverages framework capabilities
 """
 
 import asyncio
@@ -15,6 +15,7 @@ from typing import Any
 from llama_index.core.agent import ReActAgent
 from llama_index.core.agent.workflow import FunctionAgent
 from llama_index.core.memory import ChatMemoryBuffer
+from llama_index.core.storage.chat_store import SimpleChatStore
 from llama_index.llms.openai import OpenAI
 
 from src.config.settings import settings
@@ -22,15 +23,6 @@ from src.config.settings import settings
 from .config import agent_config
 from .mcp_client_base import MCPClientBase
 from .mcp_client_factory import MCPClientFactory
-
-# Import conversation management (optional)
-try:
-    from .conversation import ConversationManager
-
-    CONVERSATION_SUPPORT = True
-except ImportError:
-    CONVERSATION_SUPPORT = False
-    ConversationManager = None
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +59,10 @@ class MCPAgentOrchestrator:
         self._active_requests = 0
         self._shutdown_event = asyncio.Event()
         self._shutdown_event.set()
-        self.conversation_manager: ConversationManager | None = None
+
+        # Simplified: Use LlamaIndex's chat store directly
+        self.chat_store: SimpleChatStore | Any | None = None
+        self._session_memories: dict[str, ChatMemoryBuffer] = {}  # Cache per-session memories
 
         logger.info("Initialized MCPAgentOrchestrator")
 
@@ -170,12 +165,13 @@ class MCPAgentOrchestrator:
             # Initialize semaphore for concurrency control
             self._semaphore = asyncio.Semaphore(agent_config.agent_max_concurrent_requests)
 
-            # Initialize conversation manager if using conversational agent
-            if agent_config.agent_type.lower() == "react" and CONVERSATION_SUPPORT:
-                logger.info("Initializing ConversationManager...")
-                self.conversation_manager = ConversationManager()
-                await self.conversation_manager.initialize()
-                logger.info("ConversationManager initialized successfully")
+            # Initialize chat store for session management (if using ReActAgent)
+            if agent_config.agent_type.lower() == "react":
+                logger.info("Initializing chat store for session management...")
+                self.chat_store = self._initialize_chat_store()
+                logger.info(
+                    f"Chat store initialized successfully ({type(self.chat_store).__name__})"
+                )
 
             self._initialized = True
             logger.info(
@@ -186,6 +182,42 @@ class MCPAgentOrchestrator:
             logger.error(f"Failed to initialize orchestrator: {e}")
             await self.shutdown()
             raise
+
+    def _initialize_chat_store(self) -> SimpleChatStore | Any:
+        """Initialize chat store based on configuration.
+
+        Uses Redis if configured, otherwise falls back to in-memory SimpleChatStore.
+
+        Returns:
+            Chat store instance (SimpleChatStore or RedisChatStore)
+        """
+        # Check if Redis is configured for session persistence
+        if agent_config.session_persistence_type == "redis" and agent_config.session_redis_url:
+            try:
+                # Import RedisChatStore dynamically
+                from llama_index.storage.chat_store.redis import RedisChatStore
+
+                logger.info(
+                    f"Initializing RedisChatStore with URL: {agent_config.session_redis_url}"
+                )
+                return RedisChatStore(redis_url=agent_config.session_redis_url)
+
+            except ImportError:
+                logger.warning(
+                    "RedisChatStore not available. Install with: pip install llama-index-storage-chat-store-redis. "
+                    "Falling back to SimpleChatStore (in-memory)."
+                )
+                return SimpleChatStore()
+            except Exception as e:
+                logger.warning(
+                    f"Failed to initialize RedisChatStore: {e}. "
+                    f"Falling back to SimpleChatStore (in-memory)."
+                )
+                return SimpleChatStore()
+        else:
+            # Use in-memory SimpleChatStore
+            logger.info("Using SimpleChatStore (in-memory) for session management")
+            return SimpleChatStore()
 
     async def _load_tools(self) -> None:
         """Load tools from MCP server."""
@@ -224,30 +256,20 @@ class MCPAgentOrchestrator:
             system_prompt = agent_config.agent_system_prompt
 
             if agent_type == "react":
-                # Create ReActAgent with memory
-                logger.debug("Creating ReActAgent with memory buffer...")
-
-                memory = None
-                if agent_config.agent_memory_enabled:
-                    memory = ChatMemoryBuffer.from_defaults(
-                        token_limit=agent_config.agent_memory_token_limit
-                    )
-                    logger.debug(
-                        f"Created memory buffer (token_limit={agent_config.agent_memory_token_limit})"
-                    )
+                # Create ReActAgent WITHOUT memory (we'll add per-session memory in chat())
+                logger.debug("Creating ReActAgent (memory added per session)...")
 
                 self.agent = ReActAgent.from_tools(
                     tools=self.tools,
                     llm=llm,
-                    memory=memory,
+                    memory=None,  # No default memory - added per session
                     verbose=agent_config.agent_verbose,
                     max_iterations=agent_config.agent_max_iterations,
                     system_prompt=system_prompt,
                 )
 
                 logger.info(
-                    f"ReActAgent created (memory: {agent_config.agent_memory_enabled}, "
-                    f"max_iterations: {agent_config.agent_max_iterations})"
+                    f"ReActAgent created (max_iterations: {agent_config.agent_max_iterations})"
                 )
 
             else:
@@ -266,6 +288,31 @@ class MCPAgentOrchestrator:
         except Exception as e:
             logger.error(f"Failed to create agent: {e}")
             raise RuntimeError(f"Agent creation failed: {e}") from e
+
+    def _get_or_create_memory(self, session_id: str) -> ChatMemoryBuffer:
+        """Get or create ChatMemoryBuffer for a session.
+
+        This uses LlamaIndex's native memory management instead of custom modules.
+
+        Args:
+            session_id: Unique session identifier
+
+        Returns:
+            ChatMemoryBuffer for the session
+        """
+        if session_id not in self._session_memories:
+            logger.info(f"Creating new memory for session {session_id[:8]}")
+
+            # Use LlamaIndex's ChatMemoryBuffer with chat store
+            memory = ChatMemoryBuffer.from_defaults(
+                token_limit=agent_config.agent_memory_token_limit,
+                chat_store=self.chat_store,
+                chat_store_key=session_id,  # Session ID as storage key
+            )
+
+            self._session_memories[session_id] = memory
+
+        return self._session_memories[session_id]
 
     async def execute_query(self, query: str) -> str:
         """Execute a query using the agent.
@@ -358,48 +405,41 @@ class MCPAgentOrchestrator:
         self,
         session_id: str,
         user_message: str,
-        create_session_if_missing: bool = True,
     ) -> str:
         """Execute a conversational query with session management.
 
-        CORRECTED: Uses proper agent methods based on agent type.
+        SIMPLIFIED: Uses LlamaIndex's native ChatMemoryBuffer and SimpleChatStore.
+        No custom conversation modules needed!
+
+        Args:
+            session_id: Unique session identifier
+            user_message: User's message/query
+
+        Returns:
+            Assistant's response
         """
         # Validate query
         self._validate_query(user_message)
 
         if not self._initialized:
             raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
-        if not self.conversation_manager:
+        if agent_config.agent_type.lower() != "react":
             raise RuntimeError(
-                "Conversation manager not initialized. "
-                "Set agent_type='react' in configuration to use chat()."
+                "Chat mode requires agent_type='react'. Use execute_query() for stateless queries."
             )
         if self.agent is None:
             raise RuntimeError("Agent not created")
+        if self.chat_store is None:
+            raise RuntimeError("Chat store not initialized")
 
         try:
-            # Get or create session
-            session = await self.conversation_manager.get_session(session_id)
-            if session is None:
-                if create_session_if_missing:
-                    logger.info(f"Creating new session: {session_id[:8]}")
-                    session = await self.conversation_manager.create_session(session_id=session_id)
-                else:
-                    raise ValueError(f"Session {session_id} not found")
+            # Get or create memory for this session (handled by LlamaIndex)
+            memory = self._get_or_create_memory(session_id)
 
-            # Add user message to session history
-            await self.conversation_manager.add_message(
-                session_id=session_id, role="user", content=user_message
-            )
+            # Set agent's memory to this session's memory
+            self.agent.memory = memory
 
-            # Get conversation history
-            history = session.get_chat_history(
-                max_messages=agent_config.session_max_history_messages
-            )
-
-            logger.info(
-                f"Executing chat for session {session_id[:8]} (history: {len(history)} messages)"
-            )
+            logger.info(f"Executing chat for session {session_id[:8]}")
 
             async with self._semaphore:
                 if not self._shutdown_event.is_set():
@@ -410,39 +450,13 @@ class MCPAgentOrchestrator:
                 try:
 
                     async def execute_chat_once() -> str:
-                        # Use appropriate method based on agent type
-                        if isinstance(self.agent, ReActAgent):
-                            # ReActAgent uses .chat() method
-                            response = self.agent.chat(user_message)
-                            return str(response)
-
-                        elif isinstance(self.agent, FunctionAgent):
-                            # FunctionAgent uses .run() method
-                            result = await asyncio.wait_for(
-                                self.agent.run(user_msg=user_message),
-                                timeout=agent_config.mcp_request_timeout,
-                            )
-
-                            if isinstance(result, dict):
-                                return str(result.get("response", result))
-                            return str(result)
-
-                        else:
-                            # Generic fallback
-                            result = await asyncio.wait_for(
-                                self.agent.run(user_msg=user_message),
-                                timeout=agent_config.mcp_request_timeout,
-                            )
-                            return str(result)
+                        # Use agent.chat() which automatically manages memory
+                        response = self.agent.chat(user_message)
+                        return str(response)
 
                     # Execute with retry logic
                     response = await self._retry_with_backoff(
                         execute_chat_once, f"chat execution: {user_message[:50]}..."
-                    )
-
-                    # Add assistant response to session history
-                    await self.conversation_manager.add_message(
-                        session_id=session_id, role="assistant", content=response
                     )
 
                     logger.info(f"Chat completed for session {session_id[:8]}")
@@ -485,6 +499,63 @@ class MCPAgentOrchestrator:
         except Exception as e:
             logger.error(f"Concurrent query execution failed: {e}")
             raise RuntimeError(f"Concurrent execution failed: {e}") from e
+
+    async def get_session_history(self, session_id: str) -> list[dict[str, Any]]:
+        """Get conversation history for a session.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            List of messages in chronological order
+
+        Example:
+            >>> history = await orchestrator.get_session_history(session_id)
+            >>> for msg in history:
+            ...     print(f"{msg['role']}: {msg['content']}")
+        """
+        if not self._initialized:
+            raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
+
+        if session_id not in self._session_memories:
+            return []
+
+        memory = self._session_memories[session_id]
+        messages = memory.get()
+
+        # Convert to dict format
+        return [
+            {
+                "role": msg.role.value if hasattr(msg.role, "value") else str(msg.role),
+                "content": msg.content,
+            }
+            for msg in messages
+        ]
+
+    async def clear_session(self, session_id: str) -> bool:
+        """Clear conversation history for a session.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            True if session was cleared, False if not found
+        """
+        if session_id in self._session_memories:
+            memory = self._session_memories[session_id]
+            memory.reset()
+            del self._session_memories[session_id]
+            logger.info(f"Cleared session {session_id[:8]}")
+            return True
+        return False
+
+    async def list_sessions(self) -> list[str]:
+        """List all active session IDs.
+
+        Returns:
+            List of session IDs
+        """
+        return list(self._session_memories.keys())
 
     async def get_tools_info(self) -> list[dict[str, Any]]:
         """Get information about available tools."""
@@ -579,9 +650,9 @@ class MCPAgentOrchestrator:
                 logger.info(f"Waiting for {self._active_requests} active requests...")
                 await asyncio.sleep(0.5)
 
-            # Shutdown conversation manager
-            if self.conversation_manager is not None:
-                await self.conversation_manager.shutdown()
+            # Cleanup session memories
+            self._session_memories.clear()
+            self.chat_store = None
 
             # Disconnect MCP client
             if self.mcp_client is not None:
