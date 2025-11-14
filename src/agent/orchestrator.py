@@ -15,9 +15,12 @@ a clean async API for agent interactions.
 import asyncio
 import logging
 import random
+import threading
+import time
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+import nest_asyncio
 from llama_index.core.agent.workflow import FunctionAgent
 from llama_index.llms.openai import OpenAI
 
@@ -26,6 +29,15 @@ from src.config.settings import settings
 from .config import agent_config
 from .mcp_client_base import MCPClientBase
 from .mcp_client_factory import MCPClientFactory
+
+# Import conversation management (optional, for stateful conversations)
+try:
+    from .conversation import ConversationManager
+
+    CONVERSATION_SUPPORT = True
+except ImportError:
+    CONVERSATION_SUPPORT = False
+    ConversationManager = None
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +85,9 @@ class MCPAgentOrchestrator:
         self._active_requests = 0  # Counter for active requests
         self._shutdown_event = asyncio.Event()  # Event to signal shutdown
         self._shutdown_event.set()  # Initially not shutting down
+
+        # Conversation management (for stateful multi-turn conversations)
+        self.conversation_manager: ConversationManager | None = None
 
         logger.info("Initialized MCPAgentOrchestrator")
 
@@ -219,6 +234,18 @@ class MCPAgentOrchestrator:
             # Initialize semaphore for concurrency control
             self._semaphore = asyncio.Semaphore(agent_config.agent_max_concurrent_requests)
 
+            # Initialize conversation manager if using conversational agent
+            if agent_config.agent_type.lower() == "react" and CONVERSATION_SUPPORT:
+                logger.info("Initializing ConversationManager for stateful conversations...")
+                self.conversation_manager = ConversationManager()
+                await self.conversation_manager.initialize()
+                logger.info("ConversationManager initialized successfully")
+            elif agent_config.agent_type.lower() == "react" and not CONVERSATION_SUPPORT:
+                logger.warning(
+                    "ReActAgent configured but conversation module not available. "
+                    "Session management will not be available."
+                )
+
             self._initialized = True
             logger.info(
                 f"MCPAgentOrchestrator initialized successfully "
@@ -252,7 +279,11 @@ class MCPAgentOrchestrator:
             raise RuntimeError(f"Tool loading failed: {e}") from e
 
     async def _create_agent(self) -> None:
-        """Create LlamaIndex FunctionAgent.
+        """Create LlamaIndex agent (FunctionAgent or ReActAgent).
+
+        The agent type is determined by agent_config.agent_type:
+        - 'function': Stateless FunctionAgent (default)
+        - 'react': Conversational ReActAgent with memory
 
         Raises:
             RuntimeError: If agent creation fails
@@ -261,7 +292,8 @@ class MCPAgentOrchestrator:
             raise RuntimeError("No tools available to create agent")
 
         try:
-            logger.debug("Creating LlamaIndex FunctionAgent...")
+            agent_type = agent_config.agent_type.lower()
+            logger.info(f"Creating LlamaIndex agent (type: {agent_type})...")
 
             # Get LLM instance
             llm = OpenAI(
@@ -273,15 +305,60 @@ class MCPAgentOrchestrator:
             # Get system prompt
             system_prompt = agent_config.agent_system_prompt
 
-            # Create agent
-            self.agent = FunctionAgent(
-                tools=self.tools,
-                llm=llm,
-                system_prompt=system_prompt,
-                verbose=agent_config.agent_verbose,
-            )
+            if agent_type == "react":
+                # Create ReActAgent with memory for conversational use
+                try:
+                    from llama_index.core.agent import ReActAgent
+                    from llama_index.core.memory import ChatMemoryBuffer
 
-            logger.info("FunctionAgent created successfully")
+                    logger.debug("Creating ReActAgent with memory buffer...")
+
+                    # Create memory buffer if enabled
+                    memory = None
+                    if agent_config.agent_memory_enabled:
+                        memory = ChatMemoryBuffer.from_defaults(
+                            token_limit=agent_config.agent_memory_token_limit
+                        )
+                        logger.debug(
+                            f"Created memory buffer "
+                            f"(token_limit={agent_config.agent_memory_token_limit})"
+                        )
+
+                    # Create ReActAgent
+                    self.agent = ReActAgent.from_tools(
+                        tools=self.tools,
+                        llm=llm,
+                        memory=memory,
+                        verbose=agent_config.agent_verbose,
+                        max_iterations=agent_config.agent_max_iterations,
+                        system_prompt=system_prompt,
+                    )
+
+                    logger.info(
+                        f"ReActAgent created successfully "
+                        f"(memory: {agent_config.agent_memory_enabled}, "
+                        f"max_iterations: {agent_config.agent_max_iterations})"
+                    )
+
+                except ImportError as e:
+                    logger.error(
+                        "Failed to import ReActAgent. "
+                        "Make sure llama-index-core is installed correctly."
+                    )
+                    raise RuntimeError(f"ReActAgent import failed: {e}") from e
+
+            else:
+                # Create stateless FunctionAgent (default)
+                logger.debug("Creating FunctionAgent (stateless)...")
+
+                self.agent = FunctionAgent(
+                    tools=self.tools,
+                    llm=llm,
+                    system_prompt=system_prompt,
+                    verbose=agent_config.agent_verbose,
+                )
+
+                logger.info("FunctionAgent created successfully")
 
         except Exception as e:
             logger.error(f"Failed to create agent: {e}")
@@ -328,12 +405,136 @@ class MCPAgentOrchestrator:
                 try:
                     # Define the query execution function for retry logic
                     async def execute_query_once() -> str:
-                        # Run agent with timeout
+                        # FunctionAgent uses synchronous run() method but internally
+                        # uses async workflows that require an event loop.
+                        # We need to create a new event loop in the thread executor.
+                        def run_agent_with_event_loop(query: str) -> str:
+                            """Run agent in thread with its own event loop.
+
+                            Both the event loop and agent must run in the same thread
+                            because event loops are thread-local.
+                            """
+                            # Result container
+                            result_container = {
+                                "result": None,
+                                "exception": None,
+                                "done": threading.Event(),
+                            }
+
+                            def run_in_dedicated_thread():
+                                """Run both the event loop and agent in the same thread.
+
+                                The key insight: asyncio.get_running_loop() requires the loop
+                                to be running in the CURRENT thread. So we must run the agent
+                                in the same thread where the loop is running.
+                                """
+                                # Create a new event loop for this thread
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+
+                                # Apply nest_asyncio to allow nested event loops
+                                nest_asyncio.apply(loop)
+
+                                try:
+                                    # Run the agent directly using run_until_complete
+                                    # This will run the event loop, and when agent.run() is called,
+                                    # it will be able to access the running loop via get_running_loop()
+                                    # Even though agent.run() is blocking, the loop is running,
+                                    # so the workflow's async tasks should be able to execute
+
+                                    # Run the agent directly in the loop context
+                                    # The agent.run() is blocking, but returns a workflow handler
+                                    # We need to wait for the workflow to complete
+                                    async def agent_wrapper():
+                                        """Run agent and wait for workflow to complete."""
+                                        # Run agent directly - it will block but return a handler
+                                        # The loop is running, so workflow can create tasks
+                                        handler = self.agent.run(query)
+
+                                        # Wait for workflow to complete by polling result()
+                                        if hasattr(handler, "result"):
+                                            max_wait = agent_config.mcp_request_timeout
+                                            start_time = time.time()
+                                            while time.time() - start_time < max_wait:
+                                                try:
+                                                    if asyncio.iscoroutinefunction(handler.result):
+                                                        return await handler.result()
+                                                    else:
+                                                        # Sync result - might block until ready
+                                                        return handler.result()
+                                                except asyncio.InvalidStateError:
+                                                    # Result not ready, wait and retry
+                                                    await asyncio.sleep(0.1)
+                                                except Exception as e:
+                                                    # Other error, log and retry
+                                                    logger.debug(
+                                                        f"Error getting result: {e}, retrying..."
+                                                    )
+                                                    await asyncio.sleep(0.1)
+
+                                            # Timeout - try one more time or return handler
+                                            try:
+                                                if asyncio.iscoroutinefunction(handler.result):
+                                                    return await handler.result()
+                                                else:
+                                                    return handler.result()
+                                            except Exception:
+                                                return handler
+                                        else:
+                                            return handler
+
+                                    # Run the loop until the coroutine completes
+                                    result = loop.run_until_complete(agent_wrapper())
+                                    result_container["result"] = result
+                                except Exception as e:
+                                    result_container["exception"] = e
+                                finally:
+                                    # Clean up
+                                    try:
+                                        if not loop.is_closed():
+                                            # Cancel remaining tasks
+                                            try:
+                                                pending = [
+                                                    t
+                                                    for t in asyncio.all_tasks(loop)
+                                                    if not t.done()
+                                                ]
+                                                for task in pending:
+                                                    task.cancel()
+                                            except RuntimeError:
+                                                pass
+                                    except Exception:
+                                        pass
+                                    finally:
+                                        if not loop.is_closed():
+                                            loop.close()
+
+                                    result_container["done"].set()
+
+                            # Run everything in a dedicated thread
+                            agent_thread = threading.Thread(
+                                target=run_in_dedicated_thread, daemon=True
+                            )
+                            agent_thread.start()
+
+                            # Wait for completion
+                            if not result_container["done"].wait(
+                                timeout=agent_config.mcp_request_timeout
+                            ):
+                                raise TimeoutError("Agent execution timed out")
+
+                            agent_thread.join(timeout=2.0)
+
+                            if result_container["exception"]:
+                                raise result_container["exception"]
+
+                            return str(result_container["result"])
+
                         response = await asyncio.wait_for(
-                            self.agent.arun(query),
+                            asyncio.to_thread(run_agent_with_event_loop, query),
                             timeout=agent_config.mcp_request_timeout,
                         )
-                        return str(response)
+                        return response
 
                     # Execute with retry logic for transient failures
                     response = await self._retry_with_backoff(
@@ -357,6 +558,253 @@ class MCPAgentOrchestrator:
         except Exception as e:
             logger.error(f"Query execution failed: {e}")
             raise RuntimeError(f"Query execution failed: {e}") from e
+
+    async def chat(
+        self,
+        session_id: str,
+        user_message: str,
+        create_session_if_missing: bool = True,
+    ) -> str:
+        """Execute a conversational query with session management.
+
+        This is the primary method for stateful, multi-turn conversations.
+        It maintains chat history across multiple exchanges using session IDs.
+
+        Enterprise Pattern:
+        - Session-based conversation tracking
+        - Automatic history management
+        - Stateful agent interactions
+
+        Args:
+            session_id: Unique session identifier for this conversation
+            user_message: User's message/query
+            create_session_if_missing: Create session if it doesn't exist
+
+        Returns:
+            Assistant's response
+
+        Raises:
+            RuntimeError: If orchestrator not initialized or agent not conversational
+            ValueError: If session not found and create_session_if_missing is False
+
+        Example:
+            >>> # Multi-turn conversation
+            >>> session_id = "user123_conv1"
+            >>> response1 = await orchestrator.chat(session_id, "Find patients with diabetes")
+            >>> response2 = await orchestrator.chat(session_id, "What medications are they taking?")
+            >>> # Agent remembers context from first question
+
+        Note:
+            This method requires agent_type='react' in configuration.
+            Use execute_query() for stateless queries.
+        """
+        # Validate query
+        self._validate_query(user_message)
+
+        if not self._initialized:
+            raise RuntimeError("Orchestrator not initialized. Call initialize() first.")
+
+        if not self.conversation_manager:
+            raise RuntimeError(
+                "Conversation manager not initialized. "
+                "Set agent_type='react' in configuration to use chat()."
+            )
+
+        if self.agent is None:
+            raise RuntimeError("Agent not created")
+
+        try:
+            # Get or create session
+            session = await self.conversation_manager.get_session(session_id)
+            if session is None:
+                if create_session_if_missing:
+                    logger.info(f"Creating new session: {session_id[:8]}")
+                    session = await self.conversation_manager.create_session(session_id=session_id)
+                else:
+                    raise ValueError(f"Session {session_id} not found")
+
+            # Add user message to session history
+            await self.conversation_manager.add_message(
+                session_id=session_id, role="user", content=user_message
+            )
+
+            # Get conversation history for context
+            history = session.get_chat_history(
+                max_messages=agent_config.session_max_history_messages
+            )
+
+            logger.info(
+                f"Executing conversational query for session {session_id[:8]} "
+                f"(history: {len(history)} messages)"
+            )
+
+            # Execute query with agent (ReActAgent uses internal memory)
+            # The agent's memory is updated automatically
+            async with self._semaphore:
+                # Check if shutdown is in progress
+                if not self._shutdown_event.is_set():
+                    raise RuntimeError("Orchestrator is shutting down")
+
+                # Track active request
+                self._active_requests += 1
+
+                try:
+
+                    async def execute_chat_once() -> str:
+                        # ReActAgent uses synchronous run() method but internally
+                        # uses async workflows that require an event loop.
+                        # We need to create a new event loop in the thread executor.
+                        def run_agent_with_event_loop(query: str) -> str:
+                            """Run agent in thread with its own event loop.
+
+                            Both the event loop and agent must run in the same thread
+                            because event loops are thread-local.
+                            """
+                            # Result container
+                            result_container = {
+                                "result": None,
+                                "exception": None,
+                                "done": threading.Event(),
+                            }
+
+                            def run_in_dedicated_thread():
+                                """Run both the event loop and agent in the same thread.
+
+                                The key insight: asyncio.get_running_loop() requires the loop
+                                to be running in the CURRENT thread. So we must run the agent
+                                in the same thread where the loop is running.
+                                """
+                                # Create a new event loop for this thread
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+
+                                # Apply nest_asyncio to allow nested event loops
+                                nest_asyncio.apply(loop)
+
+                                try:
+                                    # Run the agent directly using run_until_complete
+                                    # This will run the event loop, and when agent.run() is called,
+                                    # it will be able to access the running loop via get_running_loop()
+                                    # Even though agent.run() is blocking, the loop is running,
+                                    # so the workflow's async tasks should be able to execute
+
+                                    # Run the agent directly in the loop context
+                                    # The agent.run() is blocking, but returns a workflow handler
+                                    # We need to wait for the workflow to complete
+                                    async def agent_wrapper():
+                                        """Run agent and wait for workflow to complete."""
+                                        # Run agent directly - it will block but return a handler
+                                        # The loop is running, so workflow can create tasks
+                                        handler = self.agent.run(query)
+
+                                        # Wait for workflow to complete by polling result()
+                                        if hasattr(handler, "result"):
+                                            max_wait = agent_config.mcp_request_timeout
+                                            start_time = time.time()
+                                            while time.time() - start_time < max_wait:
+                                                try:
+                                                    if asyncio.iscoroutinefunction(handler.result):
+                                                        return await handler.result()
+                                                    else:
+                                                        # Sync result - might block until ready
+                                                        return handler.result()
+                                                except asyncio.InvalidStateError:
+                                                    # Result not ready, wait and retry
+                                                    await asyncio.sleep(0.1)
+                                                except Exception as e:
+                                                    # Other error, log and retry
+                                                    logger.debug(
+                                                        f"Error getting result: {e}, retrying..."
+                                                    )
+                                                    await asyncio.sleep(0.1)
+
+                                            # Timeout - try one more time or return handler
+                                            try:
+                                                if asyncio.iscoroutinefunction(handler.result):
+                                                    return await handler.result()
+                                                else:
+                                                    return handler.result()
+                                            except Exception:
+                                                return handler
+                                        else:
+                                            return handler
+
+                                    # Run the loop until the coroutine completes
+                                    result = loop.run_until_complete(agent_wrapper())
+                                    result_container["result"] = result
+                                except Exception as e:
+                                    result_container["exception"] = e
+                                finally:
+                                    # Clean up
+                                    try:
+                                        if not loop.is_closed():
+                                            # Cancel remaining tasks
+                                            try:
+                                                pending = [
+                                                    t
+                                                    for t in asyncio.all_tasks(loop)
+                                                    if not t.done()
+                                                ]
+                                                for task in pending:
+                                                    task.cancel()
+                                            except RuntimeError:
+                                                pass
+                                    except Exception:
+                                        pass
+                                    finally:
+                                        if not loop.is_closed():
+                                            loop.close()
+
+                                    result_container["done"].set()
+
+                            # Run everything in a dedicated thread
+                            agent_thread = threading.Thread(
+                                target=run_in_dedicated_thread, daemon=True
+                            )
+                            agent_thread.start()
+
+                            # Wait for completion
+                            if not result_container["done"].wait(
+                                timeout=agent_config.mcp_request_timeout
+                            ):
+                                raise TimeoutError("Agent execution timed out")
+
+                            agent_thread.join(timeout=2.0)
+
+                            if result_container["exception"]:
+                                raise result_container["exception"]
+
+                            return str(result_container["result"])
+
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(run_agent_with_event_loop, user_message),
+                            timeout=agent_config.mcp_request_timeout,
+                        )
+                        return response
+
+                    # Execute with retry logic
+                    response = await self._retry_with_backoff(
+                        execute_chat_once, f"chat execution: {user_message[:50]}..."
+                    )
+
+                    # Add assistant response to session history
+                    await self.conversation_manager.add_message(
+                        session_id=session_id, role="assistant", content=response
+                    )
+
+                    logger.info(f"Chat completed for session {session_id[:8]}")
+                    return response
+
+                finally:
+                    # Decrement active request counter
+                    self._active_requests -= 1
+
+        except TimeoutError:
+            logger.error(f"Chat execution timeout after {agent_config.mcp_request_timeout}s")
+            raise
+        except Exception as e:
+            logger.error(f"Chat execution failed: {e}")
+            raise RuntimeError(f"Chat execution failed: {e}") from e
 
     async def execute_queries(self, queries: list[str]) -> list[str]:
         """Execute multiple queries concurrently.
@@ -446,6 +894,10 @@ class MCPAgentOrchestrator:
                         or getattr(tool, "__doc__", None)
                         or ""
                     )
+
+                # Ensure description is never None (convert to empty string)
+                if tool_description is None:
+                    tool_description = ""
 
                 # Extract parameters/schema - FunctionTool stores schema in metadata
                 tool_params = None
@@ -540,6 +992,10 @@ class MCPAgentOrchestrator:
 
                 logger.info(f"Waiting for {self._active_requests} active requests to complete...")
                 await asyncio.sleep(0.5)
+
+            # Shutdown conversation manager
+            if self.conversation_manager is not None:
+                await self.conversation_manager.shutdown()
 
             # Disconnect MCP client
             if self.mcp_client is not None:
