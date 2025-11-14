@@ -35,7 +35,7 @@ from pathlib import Path
 
 from llama_index.tools.mcp import BasicMCPClient
 
-from .mcp_client_base import MCPClientBase
+from src.mcp_client.mcp_client_base import MCPClientBase
 
 logger = logging.getLogger(__name__)
 

@@ -6,10 +6,10 @@ the appropriate MCP client based on configuration.
 
 import logging
 
-from .config import MCPTransport, agent_config
-from .mcp_client_base import MCPClientBase
-from .mcp_client_http import MCPClientHttp
-from .mcp_client_stdio import MCPClientStdio
+from src.agent.config import MCPTransport, agent_config
+from src.mcp_client.mcp_client_base import MCPClientBase
+from src.mcp_client.mcp_client_http import MCPClientHttp
+from src.mcp_client.mcp_client_stdio import MCPClientStdio
 
 logger = logging.getLogger(__name__)
 

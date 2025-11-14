@@ -19,10 +19,10 @@ from llama_index.core.storage.chat_store import SimpleChatStore
 from llama_index.llms.openai import OpenAI
 
 from src.config.settings import settings
+from src.mcp_client.mcp_client_base import MCPClientBase
+from src.mcp_client.mcp_client_factory import MCPClientFactory
 
 from .config import agent_config
-from .mcp_client_base import MCPClientBase
-from .mcp_client_factory import MCPClientFactory
 
 logger = logging.getLogger(__name__)
 

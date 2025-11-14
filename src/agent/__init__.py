@@ -25,11 +25,12 @@ Or with context manager:
     ...     response = await orchestrator.execute_query("Find patients...")
 """
 
+from src.mcp_client.mcp_client_base import MCPClientBase
+from src.mcp_client.mcp_client_factory import MCPClientFactory
+from src.mcp_client.mcp_client_http import MCPClientHttp
+from src.mcp_client.mcp_client_stdio import MCPClientStdio
+
 from .config import AgentConfig, MCPTransport, agent_config
-from .mcp_client_base import MCPClientBase
-from .mcp_client_factory import MCPClientFactory
-from .mcp_client_http import MCPClientHttp
-from .mcp_client_stdio import MCPClientStdio
 from .orchestrator import (
     MCPAgentOrchestrator,
     QueryValidationError,
@@ -43,21 +44,6 @@ from .prompts import (
     get_query_template,
     get_system_prompt,
 )
-
-# Optional conversation management (for stateful conversations)
-try:
-    from .conversation import (
-        ConversationManager,
-        ConversationMessage,
-        ConversationSession,
-        InMemorySessionStore,
-        RedisSessionStore,
-        SessionStore,
-    )
-
-    CONVERSATION_AVAILABLE = True
-except ImportError:
-    CONVERSATION_AVAILABLE = False
 
 __all__ = [
     # Orchestrator
@@ -81,16 +67,3 @@ __all__ = [
     "get_query_template",
     "format_query",
 ]
-
-# Add conversation components if available
-if CONVERSATION_AVAILABLE:
-    __all__.extend(
-        [
-            "ConversationManager",
-            "ConversationMessage",
-            "ConversationSession",
-            "SessionStore",
-            "InMemorySessionStore",
-            "RedisSessionStore",
-        ]
-    )
