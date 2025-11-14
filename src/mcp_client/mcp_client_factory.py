@@ -6,10 +6,11 @@ the appropriate MCP client based on configuration.
 
 import logging
 
-from src.agent.config import MCPTransport, agent_config
 from src.mcp_client.mcp_client_base import MCPClientBase
 from src.mcp_client.mcp_client_http import MCPClientHttp
 from src.mcp_client.mcp_client_stdio import MCPClientStdio
+
+from .config import MCPTransport, mcp_client_config
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class MCPClientFactory:
         """Create an MCP client based on transport type.
 
         Args:
-            transport: Transport type (STDIO or HTTP). If None, uses agent_config.
+            transport: Transport type (STDIO or HTTP). If None, uses mcp_client_config.
             **kwargs: Additional arguments to pass to the client constructor
 
         Returns:
@@ -44,7 +45,7 @@ class MCPClientFactory:
             >>> await client.connect()
         """
         if transport is None:
-            transport = agent_config.mcp_transport
+            transport = mcp_client_config.mcp_transport
 
         logger.info(f"Creating MCP client with transport: {transport.value}")
 
@@ -70,10 +71,12 @@ class MCPClientFactory:
             Configured MCPClientStdio instance
         """
         # Use config defaults if not provided
-        server_path = kwargs.pop("server_path", agent_config.mcp_server_path)
+        server_path = kwargs.pop("server_path", mcp_client_config.mcp_server_path)
         server_args = kwargs.pop("server_args", None)
-        connection_timeout = kwargs.pop("connection_timeout", agent_config.mcp_connection_timeout)
-        request_timeout = kwargs.pop("request_timeout", agent_config.mcp_request_timeout)
+        connection_timeout = kwargs.pop(
+            "connection_timeout", mcp_client_config.mcp_connection_timeout
+        )
+        request_timeout = kwargs.pop("request_timeout", mcp_client_config.mcp_request_timeout)
 
         logger.debug(
             f"Creating STDIO client: server_path={server_path}, "
@@ -104,11 +107,13 @@ class MCPClientFactory:
             Configured MCPClientHttp instance
         """
         # Use config defaults if not provided
-        host = kwargs.pop("host", agent_config.mcp_server_host)
-        port = kwargs.pop("port", agent_config.mcp_server_port)
+        host = kwargs.pop("host", mcp_client_config.mcp_server_host)
+        port = kwargs.pop("port", mcp_client_config.mcp_server_port)
         use_sse = kwargs.pop("use_sse", True)
-        connection_timeout = kwargs.pop("connection_timeout", agent_config.mcp_connection_timeout)
-        request_timeout = kwargs.pop("request_timeout", agent_config.mcp_request_timeout)
+        connection_timeout = kwargs.pop(
+            "connection_timeout", mcp_client_config.mcp_connection_timeout
+        )
+        request_timeout = kwargs.pop("request_timeout", mcp_client_config.mcp_request_timeout)
 
         logger.debug(
             f"Creating HTTP client: host={host}, port={port}, use_sse={use_sse}, "
@@ -126,14 +131,14 @@ class MCPClientFactory:
 
     @staticmethod
     def create_from_config() -> MCPClientBase:
-        """Create an MCP client from agent configuration.
+        """Create an MCP client from MCP client configuration.
 
         Returns:
-            Configured MCPClientBase instance based on agent_config
+            Configured MCPClientBase instance based on mcp_client_config
 
         Example:
             >>> client = MCPClientFactory.create_from_config()
             >>> await client.connect()
         """
-        logger.info("Creating MCP client from agent configuration")
-        return MCPClientFactory.create_client(transport=agent_config.mcp_transport)
+        logger.info("Creating MCP client from MCP client configuration")
+        return MCPClientFactory.create_client(transport=mcp_client_config.mcp_transport)

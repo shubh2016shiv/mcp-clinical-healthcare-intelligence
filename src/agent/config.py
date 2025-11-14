@@ -5,24 +5,13 @@ loading settings from the centralized config manager.
 """
 
 import logging
-from enum import Enum
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.mcp_client.config import MCPTransport, mcp_client_config
+
 logger = logging.getLogger(__name__)
-
-
-class MCPTransport(str, Enum):
-    """MCP server transport protocol.
-
-    Attributes:
-        STDIO: Standard input/output transport (default, local process)
-        HTTP: HTTP transport with SSE support
-    """
-
-    STDIO = "stdio"
-    HTTP = "http"
 
 
 class AgentConfig(BaseSettings):
@@ -42,46 +31,6 @@ class AgentConfig(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
-    )
-
-    # ========================================================================
-    # MCP Agent Configuration
-    # ========================================================================
-
-    mcp_transport: MCPTransport = Field(
-        default=MCPTransport.STDIO,
-        description="Transport protocol for MCP server communication (stdio or http)",
-    )
-
-    mcp_server_path: str = Field(
-        default="src/mcp_server/server.py",
-        description="Path to MCP server script (used for STDIO transport)",
-    )
-
-    mcp_server_host: str = Field(
-        default="127.0.0.1",
-        description="MCP server host (used for HTTP transport)",
-    )
-
-    mcp_server_port: int = Field(
-        default=8000,
-        description="MCP server port (used for HTTP transport)",
-        ge=1024,
-        le=65535,
-    )
-
-    mcp_connection_timeout: int = Field(
-        default=30,
-        description="Timeout for MCP server connection in seconds",
-        ge=5,
-        le=300,
-    )
-
-    mcp_request_timeout: int = Field(
-        default=60,
-        description="Timeout for individual MCP tool requests in seconds",
-        ge=10,
-        le=600,
     )
 
     # ========================================================================
@@ -206,19 +155,6 @@ class AgentConfig(BaseSettings):
         le=1000,
     )
 
-    def get_mcp_server_url(self) -> str:
-        """Get the MCP server URL for HTTP transport.
-
-        Returns:
-            The MCP server URL
-
-        Example:
-            >>> config = AgentConfig()
-            >>> config.get_mcp_server_url()
-            'http://127.0.0.1:8000/sse'
-        """
-        return f"http://{self.mcp_server_host}:{self.mcp_server_port}/sse"
-
     def validate_configuration(self) -> None:
         """Validate agent configuration.
 
@@ -227,25 +163,54 @@ class AgentConfig(BaseSettings):
         """
         logger.info("Validating agent configuration...")
 
-        # Validate transport-specific settings
-        if self.mcp_transport == MCPTransport.STDIO:
-            if not self.mcp_server_path:
-                raise ValueError("mcp_server_path is required for STDIO transport")
-        elif self.mcp_transport == MCPTransport.HTTP:
-            if not self.mcp_server_host or self.mcp_server_port <= 0:
-                raise ValueError(
-                    "mcp_server_host and mcp_server_port are required for HTTP transport"
-                )
+        # Validate agent-specific settings
+        if self.agent_type.lower() not in ["function", "react"]:
+            raise ValueError(f"agent_type must be 'function' or 'react', got '{self.agent_type}'")
 
-        # Validate timeout settings
-        if self.mcp_connection_timeout >= self.mcp_request_timeout:
+        if self.session_persistence_type.lower() not in ["in_memory", "redis"]:
+            raise ValueError(
+                f"session_persistence_type must be 'in_memory' or 'redis', "
+                f"got '{self.session_persistence_type}'"
+            )
+
+        # Validate Redis settings if Redis persistence is enabled
+        if self.session_persistence_type.lower() == "redis" and not self.session_redis_url:
             logger.warning(
-                f"mcp_connection_timeout ({self.mcp_connection_timeout}s) >= "
-                f"mcp_request_timeout ({self.mcp_request_timeout}s). "
-                f"Consider adjusting these values."
+                "session_persistence_type is 'redis' but session_redis_url is not set. "
+                "Falling back to in-memory storage."
             )
 
         logger.info("Agent configuration validation passed")
+
+    @property
+    def mcp_transport(self) -> MCPTransport:
+        """Get MCP transport from MCP client config."""
+        return mcp_client_config.mcp_transport
+
+    @property
+    def mcp_server_path(self) -> str:
+        """Get MCP server path from MCP client config."""
+        return mcp_client_config.mcp_server_path
+
+    @property
+    def mcp_server_host(self) -> str:
+        """Get MCP server host from MCP client config."""
+        return mcp_client_config.mcp_server_host
+
+    @property
+    def mcp_server_port(self) -> int:
+        """Get MCP server port from MCP client config."""
+        return mcp_client_config.mcp_server_port
+
+    @property
+    def mcp_connection_timeout(self) -> int:
+        """Get MCP connection timeout from MCP client config."""
+        return mcp_client_config.mcp_connection_timeout
+
+    @property
+    def mcp_request_timeout(self) -> int:
+        """Get MCP request timeout from MCP client config."""
+        return mcp_client_config.mcp_request_timeout
 
 
 # Global agent config instance
