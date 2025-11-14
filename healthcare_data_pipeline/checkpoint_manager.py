@@ -96,7 +96,7 @@ class CheckpointMetadata:
         self.retry_count += 1
 
     def calculate_checksum(self, data: Any) -> str:
-        """Calculate checksum for data integrity."""
+        """Calculate checksum for data server_health_checks."""
         data_str = json.dumps(data, sort_keys=True, default=str)
         return hashlib.sha256(data_str.encode()).hexdigest()
 

@@ -10,7 +10,7 @@ Features:
 - Completeness and consistency checks
 - Data quality scoring and reporting
 - Duplicate detection and profiling
-- Referential integrity validation
+- Referential server_health_checks validation
 - Quality metrics collection
 """
 
@@ -218,7 +218,7 @@ class FormatRule(DataQualityRule):
 
 
 class ReferentialIntegrityRule(DataQualityRule):
-    """Rule for checking referential integrity."""
+    """Rule for checking referential server_health_checks."""
 
     field_name: str
     referenced_collection: str
@@ -226,7 +226,7 @@ class ReferentialIntegrityRule(DataQualityRule):
     allow_missing_references: bool = Field(default=False)
 
     def validate(self, data: Any, context: dict[str, Any]) -> list[ValidationResult]:
-        """Check referential integrity."""
+        """Check referential server_health_checks."""
         results = []
 
         if not isinstance(data, dict):
@@ -262,7 +262,7 @@ class ReferentialIntegrityRule(DataQualityRule):
                 ValidationResult(
                     rule_name=self.name,
                     severity="error",
-                    message=f"Failed to check referential integrity: {e}",
+                    message=f"Failed to check referential server_health_checks: {e}",
                     field_name=self.field_name,
                     field_value=reference_value,
                     record_id=data.get("id")
