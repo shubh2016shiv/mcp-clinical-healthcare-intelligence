@@ -2,11 +2,12 @@
 
 This module implements a Model Context Protocol (MCP) server for healthcare data queries
 using the FastMCP framework. The server provides tools for searching patients, analyzing
-conditions, retrieving medication history, and querying drug information from MongoDB.
+conditions, retrieving medication history, querying drug information, and accessing care
+plans and diagnostic reports from MongoDB.
 
 Key Features:
     - FastMCP-based server implementation
-    - Five capability-based tools for healthcare data
+    - Eleven capability-based tools for healthcare data
     - Comprehensive error handling and logging
     - Pydantic-based request/response validation
     - Connection pooling and health checks
@@ -16,6 +17,8 @@ Architecture:
     - Analytics Tools: analyze_conditions, get_financial_summary
     - Medication Tools: get_medication_history
     - Drug Tools: search_drugs, analyze_drug_classes
+    - Care Plans Tools: get_patient_care_plans, analyze_care_plan_patterns
+    - Diagnostic Reports Tools: get_diagnostic_reports, search_diagnostic_reports
 
 Usage:
     Run this server and connect MCP clients (Claude Desktop, etc.) to query healthcare data.
@@ -36,14 +39,22 @@ from .tool_prompts import get_system_instructions, get_tool_prompt
 # Import from new modular structure (for compatibility and observability)
 # These provide the enhanced query logging and validation features
 from .tools._healthcare.analytics_tools import AnalyticsTools
+from .tools._healthcare.clinical_data.care_plans import CarePlansTools
+from .tools._healthcare.clinical_data.diagnostic_reports import DiagnosticReportsTools
 from .tools._healthcare.medications import DrugAnalysisTools as DrugTools
 from .tools._healthcare.medications import MedicationTools
 from .tools._healthcare.patient_tools import PatientTools
 from .tools.models import (
+    CarePlanAnalysisRequest,
+    CarePlanAnalysisResponse,
+    CarePlanRequest,
+    CarePlanResponse,
     ClinicalTimelineRequest,
     ClinicalTimelineResponse,
     ConditionAnalysisRequest,
     ConditionAnalysisResponse,
+    DiagnosticReportRequest,
+    DiagnosticReportResponse,
     DrugClassAnalysisRequest,
     DrugClassAnalysisResponse,
     DrugSearchResponse,
@@ -53,6 +64,8 @@ from .tools.models import (
     MedicationHistoryRequest,
     MedicationHistoryResponse,
     PatientSummary,
+    SearchDiagnosticReportsRequest,
+    SearchDiagnosticReportsResponse,
     SearchDrugsRequest,
     SearchPatientsRequest,
 )
@@ -130,6 +143,8 @@ def create_server() -> FastMCP:
     analytics_tools = AnalyticsTools()
     medication_tools = MedicationTools()
     drug_tools = DrugTools()
+    care_plans_tools = CarePlansTools()
+    diagnostic_reports_tools = DiagnosticReportsTools()
 
     # =============================================================================
     # PATIENT TOOLS REGISTRATION
@@ -434,6 +449,152 @@ def create_server() -> FastMCP:
                 error="Failed to analyze drug classes",
                 details=str(e),
                 operation="analyze_drug_classes",
+            ).model_dump()
+
+    # =============================================================================
+    # CARE PLANS TOOLS REGISTRATION
+    # =============================================================================
+
+    @server.tool()
+    @require_auth()
+    @with_centralized_prompt("get_patient_care_plans")
+    async def get_patient_care_plans(
+        patient_id: str = None,
+        plan_name: str = None,
+        status: str = None,
+        period_start: str = None,
+        period_end: str = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        try:
+            request = CarePlanRequest(
+                patient_id=patient_id,
+                plan_name=plan_name,
+                status=status,
+                period_start=period_start,
+                period_end=period_end,
+                limit=limit,
+            )
+            # Get security context (validated by @require_auth decorator)
+            from .security.authentication import get_security_context
+
+            security_context = get_security_context()
+
+            result: CarePlanResponse = await care_plans_tools.get_patient_care_plans(
+                request, security_context
+            )
+            return result.model_dump()
+        except Exception as e:
+            logger.error(f"Error in get_patient_care_plans: {e}")
+            return ErrorResponse(
+                error="Failed to get patient care plans",
+                details=str(e),
+                operation="get_patient_care_plans",
+            ).model_dump()
+
+    @server.tool()
+    @require_auth()
+    @with_centralized_prompt("analyze_care_plan_patterns")
+    async def analyze_care_plan_patterns(
+        group_by: str, patient_id: str = None, limit: int = 50
+    ) -> dict[str, Any]:
+        try:
+            request = CarePlanAnalysisRequest(
+                patient_id=patient_id,
+                group_by=group_by,
+                limit=limit,
+            )
+            # Get security context (validated by @require_auth decorator)
+            from .security.authentication import get_security_context
+
+            security_context = get_security_context()
+
+            result: CarePlanAnalysisResponse = await care_plans_tools.analyze_care_plan_patterns(
+                request, security_context
+            )
+            return result.model_dump()
+        except Exception as e:
+            logger.error(f"Error in analyze_care_plan_patterns: {e}")
+            return ErrorResponse(
+                error="Failed to analyze care plan patterns",
+                details=str(e),
+                operation="analyze_care_plan_patterns",
+            ).model_dump()
+
+    # =============================================================================
+    # DIAGNOSTIC REPORTS TOOLS REGISTRATION
+    # =============================================================================
+
+    @server.tool()
+    @require_auth()
+    @with_centralized_prompt("get_diagnostic_reports")
+    async def get_diagnostic_reports(
+        patient_id: str = None,
+        report_type: str = None,
+        report_date_start: str = None,
+        report_date_end: str = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        try:
+            request = DiagnosticReportRequest(
+                patient_id=patient_id,
+                report_type=report_type,
+                report_date_start=report_date_start,
+                report_date_end=report_date_end,
+                limit=limit,
+            )
+            # Get security context (validated by @require_auth decorator)
+            from .security.authentication import get_security_context
+
+            security_context = get_security_context()
+
+            result: DiagnosticReportResponse = (
+                await diagnostic_reports_tools.get_diagnostic_reports(request, security_context)
+            )
+            return result.model_dump()
+        except Exception as e:
+            logger.error(f"Error in get_diagnostic_reports: {e}")
+            return ErrorResponse(
+                error="Failed to get diagnostic reports",
+                details=str(e),
+                operation="get_diagnostic_reports",
+            ).model_dump()
+
+    @server.tool()
+    @require_auth()
+    @with_centralized_prompt("search_diagnostic_reports")
+    async def search_diagnostic_reports(
+        search_text: str = None,
+        patient_id: str = None,
+        report_type: str = None,
+        report_date_start: str = None,
+        report_date_end: str = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        try:
+            request = SearchDiagnosticReportsRequest(
+                search_text=search_text,
+                patient_id=patient_id,
+                report_type=report_type,
+                report_date_start=report_date_start,
+                report_date_end=report_date_end,
+                limit=limit,
+            )
+            # Get security context (validated by @require_auth decorator)
+            from .security.authentication import get_security_context
+
+            security_context = get_security_context()
+
+            result: SearchDiagnosticReportsResponse = (
+                await diagnostic_reports_tools.search_diagnostic_reports(request, security_context)
+            )
+            return result.model_dump()
+        except Exception as e:
+            logger.error(f"Error in search_diagnostic_reports: {e}")
+            return ErrorResponse(
+                error="Failed to search diagnostic reports",
+                details=str(e),
+                operation="search_diagnostic_reports",
             ).model_dump()
 
     return server

@@ -507,6 +507,154 @@ class DrugClassAnalysisResponse(BaseModel):
 
 
 # =============================================================================
+# CARE PLANS TOOLS MODELS
+# =============================================================================
+
+
+class CarePlanRequest(BaseModel):
+    """Request model for querying patient care plans."""
+
+    patient_id: str | None = Field(
+        None, description="Optional: Filter by specific patient ID for patient-centric analysis"
+    )
+    plan_name: str | None = Field(
+        None, description="Partial match for care plan name (case-insensitive)"
+    )
+    status: Literal["active", "completed", "suspended", "cancelled"] | None = Field(
+        None, description="Care plan status filter"
+    )
+    period_start: str | None = Field(
+        None, description="Filter plans that started on or after this date (YYYY-MM-DD)"
+    )
+    period_end: str | None = Field(
+        None, description="Filter plans that ended on or before this date (YYYY-MM-DD)"
+    )
+    limit: int = Field(50, ge=1, le=200, description="Maximum number of results")
+
+
+class CarePlanActivity(BaseModel):
+    """Individual activity within a care plan."""
+
+    activity_name: str | None = Field(None, description="Name of the activity")
+    status: str | None = Field(None, description="Activity status")
+    location: str | None = Field(None, description="Location where activity occurs")
+
+
+class CarePlanRecord(BaseModel):
+    """Individual care plan record."""
+
+    patient_id: str = Field(..., description="Patient ID who has this care plan")
+    plan_name: str | None = Field(None, description="Name of the care plan")
+    status: str | None = Field(None, description="Care plan status")
+    start_date: str | None = Field(None, description="When the care plan started")
+    end_date: str | None = Field(None, description="When the care plan ended")
+    activities: list[CarePlanActivity] | list[dict] = Field(
+        default_factory=list, description="List of activities in the care plan"
+    )
+
+
+class CarePlanResponse(BaseModel):
+    """Response model for care plan queries."""
+
+    total_count: int = Field(..., description="Total number of care plans found")
+    care_plans: list[CarePlanRecord] = Field(..., description="List of care plan records")
+
+
+class CarePlanAnalysisRequest(BaseModel):
+    """Request model for analyzing care plan patterns."""
+
+    patient_id: str | None = Field(None, description="Optional: Limit analysis to specific patient")
+    group_by: Literal["status", "plan_name", "time_period"] = Field(
+        ..., description="How to group the analysis"
+    )
+    limit: int = Field(50, ge=1, le=200, description="Maximum number of groups to return")
+
+
+class CarePlanAnalysisGroup(BaseModel):
+    """Grouped care plan analysis result."""
+
+    group_key: str = Field(..., description="Grouping key (status, plan name, or date)")
+    plan_count: int = Field(..., description="Number of care plans in this group")
+    example_plans: list[str] = Field(..., description="Sample care plan names in this group")
+
+
+class CarePlanAnalysisResponse(BaseModel):
+    """Response model for care plan analysis."""
+
+    analysis_type: str = Field(..., description="Type of analysis performed")
+    total_count: int = Field(..., description="Total number of groups found")
+    groups: list[CarePlanAnalysisGroup] = Field(..., description="Grouped analysis results")
+
+
+# =============================================================================
+# DIAGNOSTIC REPORTS TOOLS MODELS
+# =============================================================================
+
+
+class DiagnosticReportRequest(BaseModel):
+    """Request model for querying diagnostic reports."""
+
+    patient_id: str | None = Field(None, description="Optional: Filter by specific patient ID")
+    report_type: str | None = Field(
+        None, description="Partial match for report type (case-insensitive)"
+    )
+    report_date_start: str | None = Field(
+        None, description="Filter reports from this date onwards (YYYY-MM-DD)"
+    )
+    report_date_end: str | None = Field(
+        None, description="Filter reports up to this date (YYYY-MM-DD)"
+    )
+    limit: int = Field(50, ge=1, le=200, description="Maximum number of results")
+
+
+class DiagnosticReportRecord(BaseModel):
+    """Individual diagnostic report record."""
+
+    patient_id: str = Field(..., description="Patient ID who has this diagnostic report")
+    report_type: str | None = Field(None, description="Type of diagnostic report")
+    report_date: str | None = Field(None, description="Date the report was generated")
+    clinical_summary: str | None = Field(None, description="Clinical summary of the report")
+    source_fhir_id: str | None = Field(None, description="Original FHIR resource ID")
+
+
+class DiagnosticReportResponse(BaseModel):
+    """Response model for diagnostic report queries."""
+
+    total_reports: int = Field(..., description="Total number of diagnostic reports found")
+    reports: list[DiagnosticReportRecord] = Field(
+        ..., description="List of diagnostic report records"
+    )
+
+
+class SearchDiagnosticReportsRequest(BaseModel):
+    """Request model for searching diagnostic reports by clinical content."""
+
+    patient_id: str | None = Field(None, description="Optional: Limit search to specific patient")
+    search_text: str | None = Field(
+        None, description="Text to search in clinical summary (case-insensitive)"
+    )
+    report_type: str | None = Field(
+        None, description="Partial match for report type (case-insensitive)"
+    )
+    report_date_start: str | None = Field(
+        None, description="Filter reports from this date onwards (YYYY-MM-DD)"
+    )
+    report_date_end: str | None = Field(
+        None, description="Filter reports up to this date (YYYY-MM-DD)"
+    )
+    limit: int = Field(50, ge=1, le=200, description="Maximum number of results")
+
+
+class SearchDiagnosticReportsResponse(BaseModel):
+    """Response model for diagnostic report search."""
+
+    total_reports: int = Field(..., description="Total number of matching reports found")
+    reports: list[DiagnosticReportRecord] = Field(
+        ..., description="List of matching diagnostic report records"
+    )
+
+
+# =============================================================================
 # COMMON RESPONSE MODELS
 # =============================================================================
 
