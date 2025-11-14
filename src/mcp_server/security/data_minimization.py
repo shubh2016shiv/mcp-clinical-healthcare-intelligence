@@ -90,6 +90,13 @@ class DataMinimizer:
                 "source_id",
                 "event_date",
                 "event_type",
+                "event_name",
+                # Clinical event details - REQUIRED for ClinicalEvent model
+                # Rationale: The get_patient_clinical_timeline tool requires the "details"
+                # field to be present in ClinicalEvent objects. Without this field, the
+                # model validation fails when recreating ClinicalEvent objects after data
+                # minimization, breaking the clinical timeline functionality.
+                "details",
             },
             # RESEARCHER: Read access to aggregated/de-identified data only (HIPAA research exception)
             UserRole.RESEARCHER: {
@@ -128,6 +135,7 @@ class DataMinimizer:
                 "insurance_provider",
                 "claim_amount",
                 "charges",
+                "total_amount",  # Required for FinancialRecord model
                 "billing_code",
                 "diagnosis_codes",
                 "procedure_codes",
@@ -165,6 +173,16 @@ class DataMinimizer:
                 "status",  # Required: Condition status (active/resolved/inactive)
                 "onset_date",  # Required: When condition started (temporal context)
                 "verification_status",  # Required: Verification status (confirmed/provisional)
+                # Clinical event fields - REQUIRED for clinical timeline functionality
+                # Rationale: The get_patient_clinical_timeline tool requires these fields
+                # to be present in ClinicalEvent objects. Without these fields, model
+                # validation fails when recreating ClinicalEvent objects after data
+                # minimization, breaking the clinical timeline functionality.
+                "event_type",
+                "event_date",
+                "event_name",
+                "source_id",
+                "details",  # Required for ClinicalEvent model
                 # Metadata only
                 "resource_type",
             },
