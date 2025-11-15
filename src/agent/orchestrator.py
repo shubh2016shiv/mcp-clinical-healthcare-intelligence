@@ -21,6 +21,7 @@ from llama_index.llms.openai import OpenAI
 from src.config.settings import settings
 from src.mcp_client.mcp_client_base import MCPClientBase
 from src.mcp_client.mcp_client_factory import MCPClientFactory
+from src.observabilities.integrations.mixins import LowLatencyTracingMixin
 
 from .config import agent_config
 
@@ -33,7 +34,7 @@ class QueryValidationError(ValueError):
     pass
 
 
-class MCPAgentOrchestrator:
+class MCPAgentOrchestrator(LowLatencyTracingMixin):
     """Orchestrator for MCP agent with LlamaIndex.
 
     Supports both FunctionAgent (workflow-based) and ReActAgent (traditional).
@@ -289,6 +290,67 @@ class MCPAgentOrchestrator:
             logger.error(f"Failed to create agent: {e}")
             raise RuntimeError(f"Agent creation failed: {e}") from e
 
+    def get_current_trace_id(self) -> str | None:
+        """Get the current trace ID from the mixin's context.
+
+        This is useful for logging tool calls and other events during query execution.
+
+        Returns:
+            Current trace ID or None if not in a traced context
+        """
+        if hasattr(self, "_get_current_trace_id"):
+            return self._get_current_trace_id()
+        return None
+
+    def log_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict,
+        metadata: dict | None = None,
+    ) -> str | None:
+        """Log a tool call for observability.
+
+        This should be called when a tool is about to be executed.
+        Use the returned call_id with log_tool_result to match the result.
+
+        Args:
+            tool_name: Name of the tool being called
+            arguments: Arguments passed to the tool
+            metadata: Additional metadata (optional)
+
+        Returns:
+            Call ID for matching with result, or None if not in a traced context
+        """
+        trace_id = self.get_current_trace_id()
+        if trace_id and hasattr(self, "tracer"):
+            return self.tracer.log_tool_call(trace_id, tool_name, arguments, metadata)
+        return None
+
+    def log_tool_result(
+        self,
+        call_id: str,
+        result: Any,
+        execution_time_ms: float,
+        error: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        """Log a tool execution result for observability.
+
+        This should be called after a tool completes execution.
+
+        Args:
+            call_id: Call ID from log_tool_call
+            result: Tool execution result
+            execution_time_ms: Execution time in milliseconds
+            error: Error message if tool failed (optional)
+            metadata: Additional metadata (optional)
+        """
+        trace_id = self.get_current_trace_id()
+        if trace_id and hasattr(self, "tracer"):
+            self.tracer.log_tool_result(
+                trace_id, call_id, result, execution_time_ms, error, metadata
+            )
+
     def _get_or_create_memory(self, session_id: str) -> ChatMemoryBuffer:
         """Get or create ChatMemoryBuffer for a session.
 
@@ -314,10 +376,11 @@ class MCPAgentOrchestrator:
 
         return self._session_memories[session_id]
 
-    async def execute_query(self, query: str) -> str:
-        """Execute a query using the agent.
+    async def _execute_query_impl(self, query: str) -> str:
+        """Internal implementation of query execution.
 
-        CORRECTED: Uses proper agent.run() for FunctionAgent or agent.chat() for ReActAgent.
+        This is the actual query execution logic, called by execute_query()
+        after tracing is set up by the mixin.
 
         Args:
             query: The query to execute
@@ -400,6 +463,23 @@ class MCPAgentOrchestrator:
         except Exception as e:
             logger.error(f"Query execution failed: {e}")
             raise RuntimeError(f"Query execution failed: {e}") from e
+
+    async def execute_query(self, query: str, session_id: str = "default") -> str:
+        """Execute a query using the agent with tracing support.
+
+        This method is wrapped by LowLatencyTracingMixin to automatically
+        capture execution traces for observability.
+
+        Args:
+            query: The query to execute
+            session_id: Session identifier for tracing (default: "default")
+
+        Returns:
+            The agent's response
+        """
+        # Call the internal implementation
+        # The mixin wraps this method to add tracing
+        return await self._execute_query_impl(query)
 
     async def chat(
         self,
