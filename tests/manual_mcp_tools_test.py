@@ -166,7 +166,7 @@ async def main():
 
     try:
         # Run tests
-        patient_id = await test_patient_tools()
+        await test_patient_tools()
         await test_analytics_tools()
         await test_medication_tools()
         await test_drug_tools()

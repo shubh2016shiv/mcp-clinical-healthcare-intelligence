@@ -1,0 +1,53 @@
+[
+  {
+    "patient_id": "P001",
+    "first_name": "John",
+    "last_name": "Doe",
+    "birth_date": "1980-01-15",
+    "gender": "M",
+    "race": "White",
+    "ethnicity": "Not Hispanic or Latino",
+    "address": {
+      "line": ["123 Main St"],
+      "city": "San Francisco",
+      "state": "CA",
+      "postal_code": "94102",
+      "country": "US"
+    },
+    "active": true
+  },
+  {
+    "patient_id": "P002",
+    "first_name": "Jane",
+    "last_name": "Smith",
+    "birth_date": "1975-05-20",
+    "gender": "F",
+    "race": "Black or African American",
+    "ethnicity": "Not Hispanic or Latino",
+    "address": {
+      "line": ["456 Oak Ave"],
+      "city": "New York",
+      "state": "NY",
+      "postal_code": "10001",
+      "country": "US"
+    },
+    "active": true
+  },
+  {
+    "patient_id": "P003",
+    "first_name": "María",
+    "last_name": "García",
+    "birth_date": "1990-12-01",
+    "gender": "F",
+    "race": "White",
+    "ethnicity": "Hispanic or Latino",
+    "address": {
+      "line": ["789 Palm Dr"],
+      "city": "Los Angeles",
+      "state": "CA",
+      "postal_code": "90001",
+      "country": "US"
+    },
+    "active": true
+  }
+]

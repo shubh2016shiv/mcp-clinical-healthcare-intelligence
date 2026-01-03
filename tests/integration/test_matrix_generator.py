@@ -19,10 +19,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
 from src.config.settings import settings
 from src.mcp_server.database import database
 from src.mcp_server.security import initialize_security
@@ -39,6 +35,10 @@ from src.mcp_server.tools.models import (
     SearchDrugsRequest,
     SearchPatientsRequest,
 )
+
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 # Configure logging
 logging.basicConfig(
@@ -88,8 +88,8 @@ class ToolTestMatrix:
             "failed": failed,
             "success_rate": (passed / total_tests * 100) if total_tests > 0 else 0,
             "duration_seconds": duration,
-            "collections_tested": len(set(r.collection for r in self.results if r.collection)),
-            "tools_tested": len(set(r.tool_name for r in self.results)),
+            "collections_tested": len({r.collection for r in self.results if r.collection}),
+            "tools_tested": len({r.tool_name for r in self.results}),
         }
 
 
