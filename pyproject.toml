@@ -42,6 +42,7 @@ dependencies = [
     "jsonpath-ng>=1.6.0",
     "redis>=5.0.0",
     "hiredis>=3.0.0",
+    "prometheus-client>=0.17.0",
 ]
 
 # Optional/Development Dependencies
